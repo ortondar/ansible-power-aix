@@ -1,5 +1,8 @@
--name "Execute the df command in a shell"
+- name Execute the df command in a shell
   gather_facts: no
+  hosts: Power_VIO
   collections:
   - ibm.power_aix
+tasks:
+- name Here are the filesystems
 shell: df -g
