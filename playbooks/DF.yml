@@ -1,2 +1,5 @@
--name Execute the df command in a shell
+-name "Execute the df command in a shell"
+  gather_facts: no
+  collections:
+  - ibm.power_aix
 shell: df -g
