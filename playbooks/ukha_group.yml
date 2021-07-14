@@ -1,6 +1,5 @@
---- 
-- name: Create group "joker"
-hosts: Power_VIO
+-  name Create group "joker"
+  hosts: Power_VIO
   collections:
   - ibm.power_aix
   ibm.power_aix.group:
