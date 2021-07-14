@@ -1,5 +1,5 @@
 --- 
 - name: Create group "joker"
-  ibm.power_aix.group: 
+  ansible.builtin.group: 
     name: joker
     state: present
