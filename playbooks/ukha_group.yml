@@ -6,6 +6,6 @@
   tasks:
   
   - name: Create joker group
-    - ibm.power_aix.group:
+    group:
       state: present
       name: joker
