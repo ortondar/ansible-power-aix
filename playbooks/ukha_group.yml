@@ -1,5 +1,6 @@
 --- 
 - name: "Create group joker"
+hosts: Power_VIO
   collections:
   - ansible.builtin.group: 
     name: joker
