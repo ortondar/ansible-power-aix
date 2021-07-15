@@ -3,6 +3,6 @@
   hosts: Power_VIO
   collections:
   - ibm.power_aix
-  ibm.power_aix.group
+    group:
     state: present
     name: joker
