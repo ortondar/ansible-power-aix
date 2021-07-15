@@ -1,6 +1,8 @@
 --- 
 - name: "Create group joker"
   hosts: Power_VIO
+  collections:
+  ibm.power_aix
   tasks:
     - ibm.power_aix.group:
       state: present
