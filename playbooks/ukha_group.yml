@@ -1,9 +1,11 @@
 --- 
-- name: "Create group joker"
+- name: "Create groups on AIX"
   hosts: Power_VIO
   collections:
   ibm.power_aix
   tasks:
+  
+  -name: Create joker group
     - ibm.power_aix.group:
       state: present
       name: joker
