@@ -1,5 +1,6 @@
 --- 
-- name: Create group "joker"
-  ansible.builtin.group: 
+- name: "Create group joker"
+  collections:
+  - ansible.builtin.group: 
     name: joker
     state: present
