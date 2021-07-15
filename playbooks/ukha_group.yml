@@ -2,6 +2,6 @@
 - name: "Create group joker"
   hosts: Power_VIO
   collections:
-  - ansible.builtin.group: 
+  - ibm.power_aix.group: 
     name: joker
     state: present
