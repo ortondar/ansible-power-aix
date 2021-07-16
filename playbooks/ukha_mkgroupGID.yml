@@ -9,3 +9,4 @@
     group:
       state: present
       name: joker
+      group_attributes: 'id=1182'
