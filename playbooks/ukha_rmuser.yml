@@ -1,0 +1,12 @@
+--- 
+- name: "Create users on AIX"
+  hosts: Power_VIO
+  collections:
+  - ibm.power_aix
+  tasks:
+  
+  - name: Create joker user
+    user:
+      state: absent
+      name: joker
+      remove_homedir: True
