@@ -13,3 +13,5 @@
         id: 1182
         groups: joker,ldap
         pgrp: joker
+        SYSTEM: LDAPAfiles
+        registery: LDAPAfiles
