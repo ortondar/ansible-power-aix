@@ -9,3 +9,7 @@
     user:
       state: present
       name: joker
+      attributes:
+        id: 1182
+        groups: joker,ldap
+        pgrp: joker
