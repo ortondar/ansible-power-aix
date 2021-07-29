@@ -2,6 +2,7 @@
 - name: "MOTD Copy"
   hosts: all
   become: true
+  become_user: root
   gather_facts: yes
   tasks:
 
