@@ -1,7 +1,7 @@
 ---
 - name: "MOTD Copy"
   hosts: all
-  become: yes
+  become: true
   gather_facts: yes
   tasks:
 
