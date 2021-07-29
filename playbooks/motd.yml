@@ -10,7 +10,3 @@
       remote_src: no
       src: /tmp/testmotd
       dest: /tmp/testmotd.tst
-      owner: root
-      group: root
-      mode: '0644'
-      backup: yes
