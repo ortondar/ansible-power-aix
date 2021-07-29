@@ -7,6 +7,7 @@
 
   - name: Copy a new motd file into place and back up the original if it differs
     copy:
+      remote_src: no
       src: /tmp/testmotd
       dest: /tmp/testmotd.tst
       owner: root
