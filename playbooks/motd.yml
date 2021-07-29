@@ -1,13 +1,14 @@
 ---
 - name: "MOTD Copy"
   hosts: all
+  become: yes
   gather_facts: yes
   tasks:
 
   - name: Copy a new motd file into place and back up the original if it differs
     copy:
-      src: /root/testmotd
-      dest: /root/testmotd.tst
+      src: /tmp/testmotd
+      dest: /tmp/testmotd.tst
       owner: root
       group: root
       mode: '0644'
