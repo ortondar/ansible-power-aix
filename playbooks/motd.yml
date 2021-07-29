@@ -1,10 +1,13 @@
 ---
 - name: "MOTD Copy"
   hosts: all
+  gather_facts: yes
+  tasks:
 
+- name: Copy a new "motd" file into place, backing up the original if it differs from the copied version
   ansible.builtin.copy:
-    src: /mine/ntp.conf
-    dest: /etc/ntp.conf
+    src: /root/testmotd
+    dest: /root/testmotd.tst
     owner: root
     group: root
     mode: '0644'
