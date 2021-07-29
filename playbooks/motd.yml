@@ -4,7 +4,7 @@
   gather_facts: yes
   tasks:
 
-- name: Copy a new "motd" file into place, backing up the original if it differs from the copied version
+- name: Copy a new motd file into place and back up the original if it differs
   copy:
     src: /root/testmotd
     dest: /root/testmotd.tst
