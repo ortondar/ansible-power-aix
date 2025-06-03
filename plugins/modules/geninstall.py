@@ -5,7 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
-__metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
@@ -20,10 +19,10 @@ short_description: Generic installer for various packaging formats.
 description:
 - A generic installer that installs software products of various packaging formats.
 - For example, installp, RPM, SI, and ISMP.
-version_added: '2.9'
+version_added: '0.4.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - 'Privileged user with authorization: B(aix.system.install)'
 options:
   action:
@@ -72,6 +71,7 @@ options:
     description:
     - Specifies the installp flags to use when calling the installp command.
     type: str
+    default: ''
 notes:
   - You can refer to the IBM documentation for additional information on the geninstall command at
     U(https://www.ibm.com/support/knowledgecenter/ssw_aix_72/g_commands/geninstall.html)
@@ -115,7 +115,9 @@ stderr:
     sample: '0503-105 geninstall: The device or directory: /dev/cd0 does not exist.'
 '''
 
+
 from ansible.module_utils.basic import AnsibleModule
+__metaclass__ = type
 
 
 def main():
@@ -181,10 +183,10 @@ def main():
     result['stdout'] = stdout
     result['stderr'] = stderr
     if rc != 0:
-        result['msg'] = 'Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc)
+        result['msg'] = f'Command {cmd} failed with return code {rc}.'
         module.fail_json(**result)
 
-    result['msg'] = 'Command \'{0}\' successful.'.format(' '.join(cmd))
+    result['msg'] = f'Command {cmd} successful.'
     module.exit_json(**result)
 
 

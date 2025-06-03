@@ -5,7 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
-__metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
@@ -21,10 +20,10 @@ description:
 - Alters the list of possible boot devices from which the system may be booted. When the system is
   booted, it will scan the devices in the list and attempt to boot from the first device it finds
   containing a boot image.
-version_added: '2.9'
+version_added: '1.1.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - Root user or member of security group is required.
 options:
   force:
@@ -202,7 +201,9 @@ ansible_facts:
           elements: dict
 '''
 
+
 from ansible.module_utils.basic import AnsibleModule
+__metaclass__ = type
 
 
 def main():
@@ -260,6 +261,7 @@ def main():
         ret, stdout, stderr = module.run_command(cmd, check_rc=True)
         results['stdout'] += stdout  # Save verbose output
         results['changed'] = True
+        results['stderr'] = stderr
 
     # Retrieve boot lists
     bootlists = {}

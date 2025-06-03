@@ -5,7 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
-__metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
@@ -20,10 +19,10 @@ short_description: Activates or deactivates the filter rules.
 description:
 - Activates or deactivates the filter rules.
 - This command can also be used to control the filter logging function.
-version_added: '2.9'
+version_added: '1.1.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - 'Privileged user with authorizations:
   B(aix.security.network.filt,aix.security.network.stat,aix.device.manage.create)'
 options:
@@ -237,36 +236,36 @@ EXAMPLES = r'''
 - name: Allow SSH activity through interface en0
   mkfilt:
     ipv4:
-      log: yes
+      log: true
       default: deny
       rules:
-      - action: permit
-        direction: inbound
-        d_opr: eq
-        d_port: 22
-        interface: en0
-        description: permit SSH requests from any clients
-      - action: permit
-        direction: outbound
-        s_opr: eq
-        s_port: 22
-        interface: en0
-        description: permit SSH answers to any clients
+        - action: permit
+          direction: inbound
+          d_opr: eq
+          d_port: 22
+          interface: en0
+          description: permit SSH requests from any clients
+        - action: permit
+          direction: outbound
+          s_opr: eq
+          s_port: 22
+          interface: en0
+          description: permit SSH answers to any clients
 
 - name: Remove all user-defined and auto-generated filter rules
   mkfilt:
     ipv4:
       default: permit
-      force: yes
+      force: true
       rules:
-      - action: remove
-        id: all
+        - action: remove
+          id: all
 
 - name: Export filter rules as is into export text files
   mkfilt:
     action: export
     directory: /root/export
-    rawexport: yes
+    rawexport: true
 '''
 
 RETURN = r'''
@@ -289,21 +288,31 @@ filter:
     type: dict
 '''
 
+
 from ansible.module_utils.basic import AnsibleModule
+__metaclass__ = type
+
+
+results = None
 
 
 def list_rules(module, version):
     """
     Sample lsfilt output:
 
-    1|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|no|udp|eq|4001|eq|4001|both|both|no|all packets|0|all|0|||Default Rule
-    2|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|any|0|eq|5989|both|inbound|no|all packets|0|all|0|||allow port 5989
-    3|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|any|0|eq|5988|both|inbound|no|all packets|0|all|0|||allow port 5988
-    4|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|any|0|eq|5987|both|inbound|no|all packets|0|all|0|||allow port 5987
-    5|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|eq|657|any|0|both|inbound|no|all packets|0|all|0|||allow port 657
-    6|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|any|0|eq|657|both|inbound|no|all packets|0|all|0|||allow port 657
+    1|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|no|udp|eq|4001|eq|4001|both|both|no|all
+    packets|0|all|0|||Default Rule
+    2|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|any|0|eq|5989|both|inbound|no|all
+    packets|0|all|0|||allow port 5989
+    3|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|any|0|eq|5988|both|inbound|no|all
+    packets|0|all|0|||allow port 5988
+    4|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|any|0|eq|5987|both|inbound|no|all
+    packets|0|all|0|||allow port 5987
+    5|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|eq|657|any|0|both|inbound|no|all
+    packets|0|all|0|||allow port 657
+    6|permit|0.0.0.0|0.0.0.0|0.0.0.0|0.0.0.0|yes|all|any|0|eq|657|both|inbound|no|all
+    packets|0|all|0|||allow port 657
     """
-    global results
 
     vopt = '-v4' if version != 'ipv6' else '-v6'
 
@@ -312,7 +321,8 @@ def list_rules(module, version):
     if ret != 0:
         results['stdout'] += stdout
         results['stderr'] += stderr
-        results['msg'] = 'Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), ret)
+        msg_cmd = ' '.join(cmd)
+        results['msg'] = f'Command \'{msg_cmd}\' failed with return code {ret}.'
         return None
 
     rules = []
@@ -391,7 +401,6 @@ def add_change_rules(module, params, version):
     """
     Adds a new filter rule or changes an existing one.
     """
-    global results
 
     vopt = '-v4' if version == 'ipv4' else '-v6'
 
@@ -436,8 +445,11 @@ def add_change_rules(module, params, version):
             results['stdout'] += stdout
             results['stderr'] += stderr
             if ret != 0:
-                results['msg'] = 'Could not remove rule: command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), ret)
+                msg_cmd = ' '.join(cmd)
+                results['msg'] = f'Could not remove rule: command \'{msg_cmd}\' failed \
+                  with return code {ret}.'
                 module.fail_json(**results)
+            results['msg'] = "Removed the rules successfully."
             results['changed'] = True
             continue
         elif rule['action'] == 'move':
@@ -449,8 +461,11 @@ def add_change_rules(module, params, version):
             results['stdout'] += stdout
             results['stderr'] += stderr
             if ret != 0:
-                results['msg'] = 'Could not move rule: command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), ret)
+                msg_cmd = ' '.join(cmd)
+                results['msg'] = f'Could not move rule: command \'{msg_cmd}\' \
+                  failed with return code {ret}.'
                 module.fail_json(**results)
+            results['msg'] = "Moved the rules successfully."
             results['changed'] = True
             continue
 
@@ -552,8 +567,11 @@ def add_change_rules(module, params, version):
         results['stdout'] += stdout
         results['stderr'] += stderr
         if ret != 0:
-            results['msg'] = 'Could not add rule: command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), ret)
+            msg_cmd = ' '.join(cmd)
+            results['msg'] = f'Could not add rule: command \'{msg_cmd}\' \
+              failed with return code {ret}.'
             module.fail_json(**results)
+        results['msg'] = "Added the rules successfully."
         results['changed'] = True
 
     # Activate the rules
@@ -568,7 +586,9 @@ def add_change_rules(module, params, version):
     results['stdout'] += stdout
     results['stderr'] += stderr
     if ret != 0:
-        results['msg'] = 'Could not activate filter: command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), ret)
+        msg_cmd = ' '.join(cmd)
+        results['msg'] = f'Could not activate filter: command \'{msg_cmd}\' \
+          failed with return code {ret}.'
         module.fail_json(**results)
 
     if params[version]['log'] is not None:
@@ -579,8 +599,11 @@ def add_change_rules(module, params, version):
         results['stdout'] += stdout
         results['stderr'] += stderr
         if ret != 0:
-            results['msg'] = 'Could not change logging: command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), ret)
+            msg_cmd = ' '.join(cmd)
+            results['msg'] = f'Could not change logging: command \'{msg_cmd}\' \
+              failed with return code {ret}.'
             module.fail_json(**results)
+        results['msg'] = "Changed log settings successfully."
         results['changed'] = True
 
     return True
@@ -590,10 +613,10 @@ def import_rules(module, params):
     """
     Imports filter rules from an export file.
     """
-    global results
 
     cmd = ['impfilt', '-f', params['directory']]
     module.run_command(cmd, check_rc=True)
+    results['msg'] = "Rules imported successfully."
     results['changed'] = True
 
 
@@ -605,13 +628,14 @@ def export_rules(module, params):
     if params['rawexport']:
         cmd += ['-r']
     module.run_command(cmd, check_rc=True)
+    results['msg'] = "Rules exported successfully."
+    results['changed'] = True
 
 
 def check_rules(module):
     """
     Checks the syntax of filter rules.
     """
-    global results
 
     cmd = ['ckfilt']
     ret, stdout, stderr = module.run_command(cmd, check_rc=True)
@@ -642,7 +666,8 @@ def main():
             rules=dict(
                 type='list', elements='dict',
                 options=dict(
-                    action=dict(type='str', choices=['permit', 'deny', 'shun_host', 'shun_port', 'if', 'else', 'endif', 'remove', 'move']),
+                    action=dict(type='str', choices=['permit', 'deny', 'shun_host',
+                                                     'shun_port', 'if', 'else', 'endif', 'remove', 'move']),
                     id=dict(type='str'),
                     new_id=dict(type='str'),
                     direction=dict(type='str', choices=['inbound', 'outbound', 'both'], default='both'),
@@ -716,7 +741,11 @@ def main():
     rules = list_rules(module, 'ipv6')
     results['filter']['ipv6'] = rules
 
-    results['msg'] = 'mkfilt completed successfully'
+    if results['msg'] != '':
+        results['msg'] += ' mkfilt completed successfully'
+    else:
+        results['msg'] = 'mkfilt completed successfully'
+
     module.exit_json(**results)
 
 

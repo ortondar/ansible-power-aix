@@ -24,10 +24,10 @@ description:
 - Lists the mksysb or ios_backup resources available on the NIM master and allows to filter results.
 - Uses the NIM BOS installation operation to mksysb backup images on clients.
 - Uses the NIM viosbr operation to restore VIOS configuration ios_backup on clients.
-version_added: '2.9'
+version_added: '1.0.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - 'Privileged user with authorizations: B(aix.system.install,aix.system.nim.config.server)'
 options:
   action:
@@ -243,10 +243,10 @@ EXAMPLES = r'''
     targets: nimclient1
     name_postfix: _mksysb
     spot_postfix: _spot
-    remove_backup: yes
-    remove_spot: yes
-    boot_target: no
-    accept_licenses: yes
+    remove_backup: true
+    remove_spot: true
+    boot_target: false
+    accept_licenses: true
 
 - name: Backup a VIOS configuration
   nim_backup:
@@ -276,15 +276,16 @@ EXAMPLES = r'''
     volume_group: datavg
     exclude_files: my_exclude_file_res
     other_attributes: '-a comments="datavg savevg" -a verbose=yes'
-  check_mode: yes
+  check_mode: true
 
 - name: Restore a savevg image to a different disk on a LPAR
   nim_backup:
     action: restore
+    type: savevg
     targets: nimclient1
     name: nimclient1_savevg
-    remove_backup: yes
-    shrink_fs: yes
+    remove_backup: true
+    shrink_fs: true
     other_attributes: '-a disk=hdisk1 -a verbose=yes'
 '''
 
@@ -471,7 +472,7 @@ def start_threaded(thds):
             Decorator inner wrapper for thread start
             """
             thd = threading.Thread(target=func, args=(args))
-            module.debug('Start thread {0}'.format(func.__name__))
+            module.debug(f'Start thread {func.__name__}')
             thd.start()
             thds.append(thd)
         return start_threaded_inner_wrapper
@@ -517,20 +518,19 @@ def param_one_of(one_of_list, required=True, exclusive=True):
         Ansible might have this embedded in some version: require_if 4th parameter.
         Exits with fail_json in case of error
     """
-    global module
-    global results
 
     count = 0
+    action = module.params['action']
     for param in one_of_list:
         if module.params[param] is not None and module.params[param]:
             count += 1
             break
     if count == 0 and required:
-        results['msg'] = 'Missing parameter: action is {0} but one of the following is missing: '.format(module.params['action'])
+        results['msg'] = f'Missing parameter: action is {action} but one of the following is missing: '
         results['msg'] += ','.join(one_of_list)
         module.fail_json(**results)
     if count > 1 and exclusive:
-        results['msg'] = 'Invalid parameter: action is {0} supports only one of the following: '.format(module.params['action'])
+        results['msg'] = f'Invalid parameter: action is {action} supports only one of the following: '
         results['msg'] += ','.join(one_of_list)
         module.fail_json(**results)
 
@@ -542,7 +542,6 @@ def build_nim_node(module):
     arguments:
         module      (dict): The Ansible module
     """
-    global results
 
     types = ['standalone', 'vios']
     for type in types:
@@ -560,15 +559,14 @@ def get_nim_type_info(module, type):
     return:
         info_hash   (dict): information from the nim clients
     """
-    global results
 
     cmd = ['lsnim', '-t', type, '-l']
     rc, stdout, stderr = module.run_command(cmd)
     if rc != 0:
         results['stdout'] = stdout
         results['stderr'] = stderr
-        results['msg'] = 'Cannot get NIM information for {0}. Command \'{1}\' failed with return code {2}.'\
-                         .format(type, ' '.join(cmd), rc)
+        cmd = ' '.join(cmd)
+        results['msg'] = f'Cannot get NIM information for {type}. Command \'{cmd}\' failed with return code {rc}.'
         module.fail_json(**results)
 
     info_hash = build_dict(module, stdout)
@@ -620,7 +618,6 @@ def expand_targets(targets):
 
     return: the list of existing machines matching the target patterns
     """
-    global results
 
     clients = []
     for target in targets:
@@ -653,10 +650,10 @@ def expand_targets(targets):
         if rmatch:
             name = rmatch.group(1)
             for curr_name in results['nim_node']['standalone']:
-                if re.match(r"^%s\.*" % name, curr_name):
+                if re.match(rf"^{name}\.*", curr_name):
                     clients.append(curr_name)
             for curr_name in results['nim_node']['vios']:
-                if re.match(r"^%s\.*" % name, curr_name):
+                if re.match(rf"^{name}\.*", curr_name):
                     clients.append(curr_name)
             continue
 
@@ -708,7 +705,6 @@ def nim_mksysb_create(module, target, objtype, params):
         True if backup succeeded or skipped
         False otherwise
     """
-    global results
 
     name = build_name(target, params['name'], params['name_prefix'], params['name_postfix'])
 
@@ -724,13 +720,14 @@ def nim_mksysb_create(module, target, objtype, params):
     # nim -o define -t ios_mksysb -a server=master -a mk_image=yes -a location=file_path -a source=vios_name ios_mksysb_name
     cmd = ['nim', '-Fo', 'define', '-a', 'server=master', '-a', 'mk_image=yes']
     cmd += ['-t', objtype]
-    cmd += ['-a', 'location={0}'.format(location)]
-    cmd += ['-a', 'source={0}'.format(target)]
+    cmd += ['-a', f'location={location}']
+    cmd += ['-a', f'source={target}']
     if params['flags'] and params['flags'].strip():
+        flags = params['flags']
         if objtype == 'mksysb':
-            cmd += ['mksysb_flags="{0}"'.format(params['flags'])]
+            cmd += [f'mksysb_flags="{flags}"']
         elif objtype == 'ios_mksysb':
-            cmd += ['backupios_flags="{0}"'.format(params['flags'])]
+            cmd += [f'backupios_flags="{flags}"']
     if params['other_attributes']:
         cmd += params['other_attributes'].split(' ')
     cmd += [name]
@@ -740,16 +737,18 @@ def nim_mksysb_create(module, target, objtype, params):
         results['meta'][target]['stdout'] = stdout
         results['meta'][target]['stderr'] = stderr
         if rc != 0:
-            results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+            cmd = ' '.join(cmd)
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
             results['status'][target] = 'FAILURE'
             return False
 
-        results['meta'][target]['messages'].append('{0} {1} created: {2}.'.format(objtype, name, location))
+        results['meta'][target]['messages'].append(f'{objtype} {name} created: {location}.')
         results['meta'][target]['res_name'] = name
         results['status'][target] = 'SUCCESS'
         results['changed'] = True
     else:
-        results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+        cmd = ' '.join(cmd)
+        results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     return True
 
@@ -769,7 +768,6 @@ def nim_mksysb_restore(module, target, params):
         True if backup succeeded or skipped
         False otherwise
     """
-    global results
 
     # build sysb and spot resource names
     name = build_name(target, params['name'], params['name_prefix'], params['name_postfix'])
@@ -778,41 +776,45 @@ def nim_mksysb_restore(module, target, params):
     cmd = ['lsnim', spot_name]
     rc, stdout, stderr = module.run_command(cmd)
     if rc == 0:
-        msg = 'SPOT {0} exists, using it to restore {1}'.format(spot_name, name)
+        msg = f'SPOT {spot_name} exists, using it to restore {name}'
         module.log(msg)
         results['meta'][target]['messages'].append(msg)
     else:
         # Create the SPOT from the mksysb for restore operation
         # nim -o define -t spot -a server=master -a source=mksysb_name -a location=/export/spot spot1
+        spot_loc = params['spot_location']
         cmd = ['nim', '-Fo', 'define', '-t', 'spot', '-a', 'server=master']
-        cmd += ['-a', 'source={0}'.format(name)]
-        cmd += ['-a', 'location={0}'.format(params['spot_location']), spot_name]
+        cmd += ['-a', f'source={name}']
+        cmd += ['-a', f'location={spot_loc}', spot_name]
+        cmd = ' '.join(cmd)
 
         if not module.check_mode:
             rc, stdout, stderr = module.run_command(cmd)
             results['meta'][target]['stdout'] = stdout
             results['meta'][target]['stderr'] = stderr
             if rc != 0:
-                results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+                results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
                 results['status'][target] = 'FAILURE'
                 return False
 
-            results['meta'][target]['messages'].append('SPOT {0} resource created: {1}.'.format(spot_name, params['spot_location']))
+            results['meta'][target]['messages'].append(f'SPOT {spot_name} resource created: {spot_loc}.')
             results['meta'][target]['res_name'] = spot_name
             results['status'][target] = 'SUCCESS'
             results['changed'] = True
         else:
-            results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     cmd = ['nim', '-o', 'bos_inst', '-a', 'source=mksysb']
-    if params['group']:
-        cmd += ['-a', 'group={0}'.format(params['group'])]
+    param_group = params['group']
+    bosinst_data = params['bosinst_data']
+    if param_group:
+        cmd += ['-a', f'group={param_group}']
     else:
-        cmd += ['-a', 'mksysb={0}'.format(name)]
-        cmd += ['-a', 'spot={0}'.format(spot_name)]
+        cmd += ['-a', f'mksysb={name}']
+        cmd += ['-a', f'spot={spot_name}']
 
-    if params['bosinst_data']:
-        cmd += ['-a', 'bosinst_data={0}'.format(params['bosinst_data'])]
+    if bosinst_data:
+        cmd += ['-a', f'bosinst_data={bosinst_data}']
     else:
         results['meta'][target]['messages'].append('Warning: No bosinst_data specified, you will be prompted for additional settings on the console.')
 
@@ -821,52 +823,55 @@ def nim_mksysb_restore(module, target, params):
     if params['other_attributes']:
         cmd += params['other_attributes'].split(' ')
     cmd += [target]
+    cmd = ' '.join(cmd)
 
     if not module.check_mode:
         rc, stdout, stderr = module.run_command(cmd)
         results['meta'][target]['stdout'] = stdout
         results['meta'][target]['stderr'] = stderr
         if rc != 0:
-            results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
             results['status'][target] = 'FAILURE'
             return False
 
-        results['meta'][target]['messages'].append('Backup {0} has been restored.'.format(name))
+        results['meta'][target]['messages'].append(f'Backup {name} has been restored.')
         results['status'][target] = 'SUCCESS'
         results['changed'] = True
     else:
-        results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+        results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     # Remove NIM resources?
     if params['remove_spot']:
         cmd = ['nim', '-o', 'remove', spot_name]
+        cmd = ' '.join(cmd)
         if not module.check_mode:
             rc, stdout, stderr = module.run_command(cmd)
             if rc != 0:
                 results['meta'][target]['stdout'] = stdout
                 results['meta'][target]['stderr'] = stderr
-                results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+                results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
                 results['status'][target] = 'FAILURE'
                 return False
 
-            results['meta'][target]['messages'].append('SPOT resource {0} has been removed.'.format(spot_name))
+            results['meta'][target]['messages'].append(f'SPOT resource {spot_name} has been removed.')
         else:
-            results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     if params['remove_backup']:
         cmd = ['nim', '-o', 'remove', name]
+        cmd = ' '.join(cmd)
         if not module.check_mode:
             rc, stdout, stderr = module.run_command(cmd)
             if rc != 0:
                 results['meta'][target]['stdout'] = stdout
                 results['meta'][target]['stderr'] = stderr
-                results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+                results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
                 results['status'][target] = 'FAILURE'
                 return False
 
-            results['meta'][target]['messages'].append('Backup {0} has been removed.'.format(name))
+            results['meta'][target]['messages'].append(f'Backup {name} has been removed.')
         else:
-            results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     return True
 
@@ -886,7 +891,6 @@ def nim_iosbackup_create(module, target, params):
         True if restore succeeded or skipped
         False otherwise
     """
-    global results
 
     name = build_name(target, params['name'], params['name_prefix'], params['name_postfix'])
 
@@ -898,27 +902,28 @@ def nim_iosbackup_create(module, target, params):
     # nim -Fo define -t ios_backup -a mk_image=yes -a server=master
     #  -a source=<vios> -a location=/export/nim/ios_backup/<vio>_ios_backup <vios>_iosb
     cmd = ['nim', '-Fo', 'define', '-t', 'ios_backup', '-a', 'mk_image=yes', '-a', 'server=master']
-    cmd += ['-a', 'source={0}'.format(target)]
-    cmd += ['-a', 'location={0}'.format(location)]
+    cmd += ['-a', f'source={target}']
+    cmd += ['-a', f'location={location}']
     if params['other_attributes']:
         cmd += params['other_attributes'].split(' ')
     cmd += [name]
+    cmd = ' '.join(cmd)
 
     if not module.check_mode:
         rc, stdout, stderr = module.run_command(cmd)
         results['meta'][target]['stdout'] = stdout
         results['meta'][target]['stderr'] = stderr
         if rc != 0:
-            results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
             results['status'][target] = 'FAILURE'
             return False
 
-        results['meta'][target]['messages'].append('ios_backup {0} created: {1}.'.format(name, location))
+        results['meta'][target]['messages'].append(f'ios_backup {name} created: {location}.')
         results['meta'][target]['res_name'] = name
         results['status'][target] = 'SUCCESS'
         results['changed'] = True
     else:
-        results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+        results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     return True
 
@@ -938,45 +943,47 @@ def nim_iosbackup_restore(module, target, params):
         True if restore succeeded or skipped
         False otherwise
     """
-    global results
+
     name = build_name(target, params['name'], params['name_prefix'], params['name_postfix'])
 
     # nim -Fo viosbr -a ios_backup=ios_backup_<vios> <vios>
     cmd = ['nim', '-Fo', 'viosbr']
-    cmd += ['-a', 'ios_backup={0}'.format(name)]
+    cmd += ['-a', f'ios_backup={name}']
     if params['other_attributes']:
         cmd += params['other_attributes'].split(' ')
     cmd += [target]
 
+    cmd = ' '.join(cmd)
     if not module.check_mode:
         rc, stdout, stderr = module.run_command(cmd)
         results['meta'][target]['stdout'] = stdout
         results['meta'][target]['stderr'] = stderr
         if rc != 0:
-            results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
             results['status'][target] = 'FAILURE'
             return False
 
-        results['meta'][target]['messages'].append('Backup {0} has been restored.'.format(name))
+        results['meta'][target]['messages'].append(f'Backup {name} has been restored.')
         results['status'][target] = 'SUCCESS'
         results['changed'] = True
     else:
-        results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+        results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     if params['remove_backup']:
         cmd = ['nim', '-o', 'remove', name]
+        cmd = ' '.join(cmd)
         if not module.check_mode:
             rc, stdout, stderr = module.run_command(cmd)
             results['meta'][target]['stdout'] = stdout
             results['meta'][target]['stderr'] = stderr
             if rc != 0:
-                results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+                results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
                 results['status'][target] = 'FAILURE'
                 return False
 
-            results['meta'][target]['messages'].append('Backup {0} has been removed.'.format(name))
+            results['meta'][target]['messages'].append(f'Backup {name} has been removed.')
         else:
-            results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     return True
 
@@ -993,16 +1000,16 @@ def nim_list_backup(module, target, objtype, params):
     return:
         backup_info (dict): the backups information
     """
-    global results
 
     backup_info = {}
     if module.params['name']:
         cmd = ['lsnim', '-l', module.params['name']]
+        cmd = ' '.join(cmd)
         rc, stdout, stderr = module.run_command(cmd)
         results['stdout'] = stdout
         results['stderr'] = stderr
         if rc != 0:
-            results['msg'] = 'Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc)
+            results['msg'] = f'Command \'{cmd}\' failed with return code {rc}.'
             module.fail_json(**results)
 
         results['msg'] = 'List backup completed successfully.'
@@ -1045,34 +1052,35 @@ def nim_view_backup(module, params):
         Set results['status'][target] with the status
         Exits with fail_json in case of error
     """
-    global results
 
     cmd = ['lsnim', '-l', params['name']]
     rc, stdout, stderr = module.run_command(cmd)
     results['stdout'] = stdout
     results['stderr'] = stderr
+    params_name = params['name']
     if rc != 0:
-        results['msg'] = 'NIM resource \'{0}\' not found.'.format(params['name'])
+        results['msg'] = f'NIM resource \'{params_name}\' not found.'
         module.fail_json(**results)
 
     results.update({'backup_info': build_dict(module, stdout)})
 
     if 'source_image' not in results['backup_info'][params['name']]:
-        results['msg'] = 'Attribute \'source_image\' not found in ios_backup resource {0}.'.format(params['name'])
+        results['msg'] = f'Attribute \'source_image\' not found in ios_backup resource {params_name}.'
         module.fail_json(**results)
     target = results['backup_info'][params['name']]['source_image']
 
     # nim -Fo viosbr -a viosbr_action=view -a ios_backup=quimby-vios1_iosb quimby-vios1
     cmd = ['nim', '-Fo', 'viosbr', '-a', 'viosbr_action=view']
-    cmd += ['-a', 'ios_backup={0}'.format(params['name'])]
+    cmd += ['-a', f'ios_backup={params_name}']
     if params['other_attributes']:
         cmd += params['other_attributes'].split(' ')
     cmd += [target]
+    cmd = ' '.join(cmd)
     rc, stdout, stderr = module.run_command(cmd)
     results['stdout'] = stdout
     results['stderr'] = stderr
     if rc != 0:
-        results['msg'] = 'Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc)
+        results['msg'] = f'Command \'{cmd}\' failed with return code {rc}.'
         module.fail_json(**results)
 
     results['status'][target] = 'SUCCESS'
@@ -1093,8 +1101,10 @@ def nim_savevg_create(module, target, params):
         True if restore succeeded or skipped
         False otherwise
     """
-    global results
 
+    params_flags = params['flags']
+    params_vg = params['volume_group']
+    params_exclude_files = params['exclude_files']
     name = build_name(target, params['name'], params['name_prefix'], params['name_postfix'])
 
     # compute backup location
@@ -1106,29 +1116,30 @@ def nim_savevg_create(module, target, params):
     # nim -o define -t savevg -a server=master -a mk_image=yes -a location=file_path -a source=lpar_name
     #                         -a volume_group=vgname -a exclude_files=exclude_list savevg_name
     cmd = ['nim', '-o', 'define', '-t', 'savevg', '-a', 'server=master', '-a', 'mk_image=yes']
-    cmd += ['-a', 'location={0}'.format(location)]
+    cmd += ['-a', f'location={location}']
     if params['flags'] and params['flags'].strip():
-        cmd += ['savevg_flags="{0}"'.format(params['flags'])]
-    cmd += ['-a', 'source={0}'.format(target)]
+        cmd += [f'savevg_flags="{params_flags}"']
+    cmd += ['-a', f'source={target}']
     if params['volume_group']:
-        cmd += ['-a', 'volume_group={0}'.format(params['volume_group'])]
+        cmd += ['-a', f'volume_group={params_vg}']
     if params['exclude_files']:
-        cmd += ['-a', 'exclude_files={0}'.format(params['exclude_files'])]
+        cmd += ['-a', f'exclude_files={params_exclude_files}']
     if module.check_mode:
         cmd += ['-a', 'size_preview=yes']
     if params['other_attributes']:
         cmd += params['other_attributes'].split(' ')
     cmd += [name]
+    cmd = ' '.join(cmd)
 
     rc, stdout, stderr = module.run_command(cmd)
     results['meta'][target]['stdout'] = stdout
     results['meta'][target]['stderr'] = stderr
     if rc != 0:
-        results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+        results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
         results['status'][target] = 'FAILURE'
         return False
 
-    results['meta'][target]['messages'].append('savevg {0} created: {1}.'.format(name, location))
+    results['meta'][target]['messages'].append(f'savevg {name} created: {location}.')
     results['meta'][target]['res_name'] = name
     results['status'][target] = 'SUCCESS'
     if not module.check_mode:
@@ -1152,46 +1163,48 @@ def nim_savevg_restore(module, target, params):
         True if restore succeeded or skipped
         False otherwise
     """
-    global results
+
     name = build_name(target, params['name'], params['name_prefix'], params['name_postfix'])
 
     # nim -o restvg -a savevg=savevg_res_name -a shrink=<yes|no> lpar_name
     cmd = ['nim', '-o', 'restvg']
-    cmd += ['-a', 'savevg={0}'.format(name)]
+    cmd += ['-a', f'savevg={name}']
     cmd += ['-a', 'shrink=yes' if module.params['shrink_fs'] else 'shrink=no']
     if params['other_attributes']:
         cmd += params['other_attributes'].split(' ')
     cmd += [target]
+    cmd = ' '.join(cmd)
 
     if not module.check_mode:
         rc, stdout, stderr = module.run_command(cmd)
         results['meta'][target]['stdout'] = stdout
         results['meta'][target]['stderr'] = stderr
         if rc != 0:
-            results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
             results['status'][target] = 'FAILURE'
             return False
 
-        results['meta'][target]['messages'].append('Backup {0} has been restored.'.format(name))
+        results['meta'][target]['messages'].append(f'Backup {name} has been restored.')
         results['status'][target] = 'SUCCESS'
         results['changed'] = True
     else:
-        results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+        results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     if params['remove_backup']:
         cmd = ['nim', '-o', 'remove', name]
+        cmd = ' '.join(cmd)
         if not module.check_mode:
             rc, stdout, stderr = module.run_command(cmd)
             results['meta'][target]['stdout'] = stdout
             results['meta'][target]['stderr'] = stderr
             if rc != 0:
-                results['meta'][target]['messages'].append('Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc))
+                results['meta'][target]['messages'].append(f'Command \'{cmd}\' failed with return code {rc}.')
                 results['status'][target] = 'FAILURE'
                 return False
 
-            results['meta'][target]['messages'].append('Backup {0} has been removed.'.format(name))
+            results['meta'][target]['messages'].append(f'Backup {name} has been removed.')
         else:
-            results['meta'][target]['messages'].append('Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd)))
+            results['meta'][target]['messages'].append(f'Command \'{cmd}\' has no preview mode, execution skipped.')
 
     return True
 
@@ -1273,11 +1286,12 @@ def main():
 
     # check targets are valid NIM clients
     targets = []
+    params_targets = module.params['targets']
     if module.params['targets']:
-        targets = expand_targets(module.params['targets'])
+        targets = expand_targets(params_targets)
     if not targets and action != 'list' and action != 'view':
-        results['msg'] = 'No matching target found for targets \'{0}\'.'.format(module.params['targets'])
-        module.log('Warning: Empty target list: "{0}"'.format(targets))
+        results['msg'] = f'No matching target found for targets \'{params_targets}\'.'
+        module.log(f'Warning: Empty target list: "{targets}"')
         module.exit_json(**results)
     results['targets'] = list(targets)
 
@@ -1338,8 +1352,8 @@ def main():
                     params['exclude_files'] = module.params['exclude_files']
                     nim_savevg_create(module, target, params)
                 else:
-                    results['meta'][target]['messages'].append('Operation {0} {1} not supported on a standalone machine. You may want to select mksysb.'
-                                                               .format(action, objtype))
+                    meta_msg = f'Operation {action} {objtype} not supported on a standalone machine. You may want to select mksysb.'
+                    results['meta'][target]['messages'] = meta_msg
                     results['status'][target] = 'FAILURE'
                     continue
 
@@ -1349,8 +1363,7 @@ def main():
                 elif objtype == 'ios_backup':
                     nim_iosbackup_create(module, target, params)
                 else:
-                    results['meta'][target]['messages'].append('Operation {0} {1} not supported on a VIOS. You may want to select ios_mksysb.'
-                                                               .format(action, objtype))
+                    results['meta'][target]['messages'].append(f'Operation {action} {objtype} not supported on a VIOS. You may want to select ios_mksysb.')
                     results['status'][target] = 'FAILURE'
                     continue
         wait_all()
@@ -1359,13 +1372,12 @@ def main():
         for target in targets:
 
             if target in results['nim_node']['standalone'] and objtype != 'mksysb' and objtype != 'savevg':
-                results['meta'][target]['messages'].append('Operation {0} {1} not supported on a standalone machine. You may want to select mksysb.'
-                                                           .format(action, objtype))
+                meta_msg2 = f'Operation {action} {objtype} not supported on a standalone machine. You may want to select mksysb.'
+                results['meta'][target]['messages'] = meta_msg2
                 results['status'][target] = 'FAILURE'
                 continue
             if target in results['nim_node']['vios'] and (objtype == 'mksysb' or objtype == 'savevg'):
-                results['meta'][target]['messages'].append('Operation {0} {1} not supported on a VIOS. You may want to select ios_mksysb.'
-                                                           .format(action, objtype))
+                results['meta'][target]['messages'].append(f'Operation {action} {objtype} not supported on a VIOS. You may want to select ios_mksysb.')
                 results['status'][target] = 'FAILURE'
                 continue
 
@@ -1399,10 +1411,10 @@ def main():
     # Exit
     target_errored = [key for key, val in results['status'].items() if 'FAILURE' in val]
     if len(target_errored):
-        results['msg'] = "NIM backup {0} operation failed for {1}. See status and meta for details.".format(action, target_errored)
+        results['msg'] = f"NIM backup {action} operation failed for {target_errored}. See status and meta for details."
         module.fail_json(**results)
     else:
-        results['msg'] = 'NIM backup {0} operation successfull. See status and meta for details.'.format(action)
+        results['msg'] = f'NIM backup {action} operation successfull. See status and meta for details.'
         module.exit_json(**results)
 
 

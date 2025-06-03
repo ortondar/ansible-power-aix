@@ -5,7 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
-__metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
@@ -20,10 +19,10 @@ short_description: Sets the required values for starting TCP/IP on a host.
 description:
 - This module sets the required minimal values required for using TCP/IP on a host machine.
 - These values are written to the configuration database.
-version_added: '2.9'
+version_added: '0.4.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - 'Privileged user with authorization: B(aix.network.config.tcpip)'
 options:
   hostname:
@@ -79,7 +78,7 @@ EXAMPLES = r'''
     interface: en0
     nameserver: 192.9.200.1
     domain: austin.century.com
-    start_daemons: yes
+    start_daemons: true
 '''
 
 RETURN = r'''
@@ -113,7 +112,9 @@ stderr:
              /usr/sbin/mktcpip: Problem with command: hostent, return code = 1\n'
 '''
 
+
 from ansible.module_utils.basic import AnsibleModule
+__metaclass__ = type
 
 
 def main():
@@ -169,10 +170,10 @@ def main():
     result['stdout'] = stdout
     result['stderr'] = stderr
     if rc != 0:
-        result['msg'] = 'Command \'{0}\' failed with return code {1}.'.format(result['cmd'], rc)
+        result['msg'] = f'Command \'{cmd}\' failed with return code {rc}.'
         module.fail_json(**result)
 
-    result['msg'] = 'Command \'{0}\' successful.'.format(result['cmd'])
+    result['msg'] = f'Command \'{cmd}\' successful.'
     result['changed'] = True
     module.exit_json(**result)
 

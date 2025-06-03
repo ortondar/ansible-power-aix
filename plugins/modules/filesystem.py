@@ -5,6 +5,7 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
+
 __metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
@@ -19,10 +20,10 @@ module: filesystem
 short_description: Local and NFS filesystems management.
 description:
 - This module allows to create, modify and remove local and NFS filesystems.
-version_added: '2.9'
+version_added: '1.0.0'
 requirements:
 - AIX
-- Python >= 2.7
+- Python >= 3.6
 - 'Privileged user with authorizations:
   B(aix.fs.manage.list,aix.fs.manage.create,aix.fs.manage.change,aix.fs.manage.remove,aix.network.nfs.mount)'
 options:
@@ -68,17 +69,24 @@ options:
     description:
     - When I(state=present), for local filesystems, specifies whether the file system is to be
       processed by the accounting subsystem.
-    type: bool
+    type: str
+    choices: ['yes', 'no']
   fs_type:
     description:
     - Specifies the virtual filesystem type to create the local filesystem.
     type: str
     default: jfs2
+  nfs_soft_mount:
+    description:
+    - Creates a soft mount, which means the system returns an error if the server does not respond.
+    type: bool
+    default: False
   auto_mount:
     description:
     - Specifies whether to automatically mount the filesystem at system restart while creating or
       updating filesystem.
-    type: bool
+    type: str
+    choices: ['yes', 'no']
   permissions:
     description:
     - Specifies file system permissions while creation/updation of any filesystem.
@@ -144,11 +152,12 @@ stderr:
     type: str
 '''
 
+
 from ansible.module_utils.basic import AnsibleModule
-import re
 
 
 result = None
+crfs_specific_attributes = ["ag", "bf", "compress", "frag", "nbpi", "agblksize", "isnapshot"]
 
 
 def is_nfs(module, filesystem):
@@ -158,8 +167,8 @@ def is_nfs(module, filesystem):
     param filesystem: filesystem name.
     return: True - filesystem is NFS type / False - filesystem is not NFS type
     """
-    cmd = "lsfs -l %s" % filesystem
-    rc, stdout, stderr = module.run_command(cmd)
+    cmd = f"lsfs -l {filesystem}"
+    rc, stdout = module.run_command(cmd)[:2]
     if rc != 0:
         return None
 
@@ -168,8 +177,29 @@ def is_nfs(module, filesystem):
 
     if type == "nfs":
         return True
-    else:
-        return False
+    return False
+
+
+def valid_attributes(module):
+    """
+    Returns list of valid attributes for chfs command
+    param:
+        module - Ansible module argument spec.
+    return:
+        valid_attrs (list) - List of valid attributes among the provided ones.
+    """
+    attr = module.params['attributes']
+    if attr is None:
+        return True
+
+    valid_attrs = []
+
+    for attributes in attr:
+        if attributes.split("=")[0] in crfs_specific_attributes:
+            continue
+        valid_attrs.append(attributes)
+
+    return valid_attrs
 
 
 def fs_state(module, filesystem):
@@ -181,15 +211,15 @@ def fs_state(module, filesystem):
              None - filesystem does not exist
     """
 
-    cmd = "lsfs -l %s" % filesystem
-    rc, stdout, stderr = module.run_command(cmd)
+    cmd = f"lsfs -l {filesystem}"
+    rc = module.run_command(cmd)[0]
     if rc != 0:
         return None
 
     cmd = "df"
-    rc, stdout, stderr = module.run_command(cmd)
+    rc, stdout = module.run_command(cmd)[:2]
     if rc != 0:
-        module.fail_json("Command '%s' failed." % cmd)
+        module.fail_json(f"Command {cmd} failed.")
 
     if stdout:
         mdirs = []
@@ -201,6 +231,141 @@ def fs_state(module, filesystem):
     return False
 
 
+def compare_attrs(module):
+    """
+    Helper function to compare the provided and already existing attributes of a filesystem
+    params:
+        module - Ansible module argument spec.
+    return:
+        updated_attrs (list) - List of updated attributes and their values, that need to be changed
+    """
+
+    fs_mount_pt = module.params['filesystem']
+    cmd1 = f"lsfs -c {fs_mount_pt}"
+    cmd2 = f"lsfs -q {fs_mount_pt}"
+
+    rc1, stdout1, stderr1 = module.run_command(cmd1)
+
+    if rc1:
+        result['stdout'] = stdout1
+        result['cmd'] = cmd1
+        result['stderr'] = stderr1
+        result['msg'] = "Could not get information about the provided filesystem."
+        module.fail_json(**result)
+
+    rc2, stdout2, stderr2 = module.run_command(cmd2)
+
+    if rc2:
+        result['stdout'] = stdout2
+        result['cmd'] = cmd2
+        result['stderr'] = stderr2
+        result['msg'] = "Could not get information about the provided filesystem."
+        module.fail_json(**result)
+
+    current_attributes = {}
+
+    fs_attrs = ["mountpoint", "device", "vfs", "nodename", "type", "size", "options", "automount", "acct"]
+
+    lines1 = stdout1.splitlines()
+    line1 = lines1[1].replace("::", ":--:")
+    line1 = line1.split(":")
+
+    for it in range(9):
+        current_attributes[fs_attrs[it]] = line1[it]
+
+    lines2 = stdout2.splitlines()
+
+    fs_attrs = ["name", "nodename", "mount pt", "vfs", "size", "options", "auto", "accounting"]
+
+    line2 = lines2[1].split()
+    for it in range(8):
+        if fs_attrs[it] in current_attributes.keys() and current_attributes[fs_attrs[it]] != "--":
+            continue
+        current_attributes[fs_attrs[it]] = line2[it]
+
+    mapped_key = {
+        "dmapi": "managed",
+        "fs size": "size",
+        "eaformat": "ea",
+        "inline log size": "logsize"
+    }
+
+    # In case of non-JFS/JFS2 fs, lsfs -q provides less information (no info inside brackets)
+    if len(lines2) >= 3:
+        for it in lines2[2].split(","):
+            curr_attr = it.split(":")
+            attr_key = curr_attr[0].strip().lower()
+            attr_val = curr_attr[1].strip()
+            if attr_key[0] == "(":
+                attr_key = attr_key[1:]
+            if attr_val[-1] == ")":
+                attr_val = attr_val[:-1]
+            if attr_key in mapped_key.keys():
+                attr_key = mapped_key[attr_key]
+            current_attributes[attr_key] = attr_val
+
+    amount = module.params["auto_mount"]
+    perms = module.params["permissions"]
+    mgroup = module.params["mount_group"]
+    acct_sub_sys = module.params["account_subsystem"]
+    check_other_perms = 0
+
+    if not amount or amount == current_attributes['auto']:
+        module.params['auto_mount'] = ""
+        check_other_perms += 1
+
+    if not perms or perms == current_attributes['options']:
+        module.params['permissions'] = ""
+        check_other_perms += 1
+
+    if not mgroup or mgroup == current_attributes['type']:
+        module.params['mount_group'] = ""
+        check_other_perms += 1
+
+    if not acct_sub_sys or acct_sub_sys == current_attributes['accounting']:
+        module.params['account_subsystem'] = ""
+        check_other_perms += 1
+
+    updated_attrs = []
+
+    if module.params['attributes']:
+        module.params['attributes'] = valid_attributes(module)
+        provided_attributes = module.params['attributes']
+
+        for attrs in provided_attributes:
+            attrs = attrs.split("=")
+            attr = attrs[0].strip()
+            val = attrs[1].strip()
+            val = val.strip('\"')  # For case when variables are used while providing values to attributes
+            if attr == "log" or attr == "logname":
+                if val == "INLINE":
+                    val = "yes"
+                if current_attributes['inline log'] and val != current_attributes['inline log']:
+                    updated_attrs.append(f"{attr}={val}")
+                continue
+
+            prefix = ["+", "-"]
+            if attr == "size" and val[0] not in prefix:
+                if val[-1] == "M":
+                    val = int(val[:-1])
+                    if val % 64 != 0:
+                        val = str(((val // 64) + 1) * 64)
+                if str(val)[-1] == "G":
+                    val = int(val[:-1])
+                    val = str(val * 1024)
+                block_size = int(current_attributes["block size"]) // 1024
+                val = str(int(val) * block_size * 512)
+
+            if attr not in current_attributes.keys() or val not in current_attributes[attr].split(','):
+                updated_attrs.append(f"{attr}={val}")
+
+    if check_other_perms == 4 and len(updated_attrs) == 0:
+        result['msg'] = "No modification is required, exiting!"
+        module.exit_json(**result)
+
+    module.params['attributes'] = updated_attrs
+
+
 def nfs_opts(module):
     """
     Helper function to build NFS parameters for mknfsmnt and chnfsmnt.
@@ -208,18 +373,22 @@ def nfs_opts(module):
     amount = module.params["auto_mount"]
     perms = module.params["permissions"]
     mgroup = module.params["mount_group"]
+    nfs_soft_mount = module.params["nfs_soft_mount"]
 
     opts = ""
-    if amount is True:
+    if amount == "yes":
         opts += "-A "
-    elif amount is False:
+    elif amount == "no":
         opts += "-a "
 
+    if nfs_soft_mount:
+        opts += "-S "
+
     if perms:
-        opts += "-t %s " % perms
+        opts += f"-t {perms} "
 
     if mgroup:
-        opts += "-m %s " % mgroup
+        opts += f"-m {mgroup} "
 
     return opts
 
@@ -235,10 +404,8 @@ def fs_opts(module):
     acct_sub_sys = module.params["account_subsystem"]
 
     opts = ""
-    if amount is True:
-        opts += "-A yes "
-    elif amount is False:
-        opts += "-A no "
+    if amount:
+        opts += f"-A {amount} "
 
     if attrs:
         opts += "-a " + ' -a '.join(attrs) + " "
@@ -246,194 +413,59 @@ def fs_opts(module):
         opts += ""
 
     if mgroup:
-        opts += "-u %s " % mgroup
+        opts += f"-u {mgroup} "
 
     if perms:
-        opts += "-p %s " % perms
+        opts += f"-p {perms} "
 
     if acct_sub_sys:
-        opts += "-t yes "
-    elif acct_sub_sys is False:
-        opts += "-t no "
+        opts += f"-t {acct_sub_sys} "
 
     return opts
-
-
-def check_attr_change(module, filesystem):
-    """
-    Determines if changes will be made on the filesystem.
-    param module: Ansible module argument spec.
-    param filesystem: filesystem name.
-    return: True - changes will be made on the filesystem / False = filesystem will remain unchanged
-    """
-    global result
-
-    cmd = "lsfs -cq %s" % filesystem
-    rc, stdout, stderr = module.run_command(cmd)
-    if rc != 0:
-        msg = "Failed to fetch current attributes of '%s'. cmd - '%s'" % (filesystem, cmd)
-        result["rc"] = rc
-        result["msg"] = msg
-        result["stdout"] = stdout
-        result["stderr"] = stderr
-        module.fail_json(**result)
-
-    all_attr = stdout.splitlines()
-
-    # list of items used in old_attr
-    # old_attr[4] - mount group
-    # old_attr[5] - size
-    # old_attr[6] - permissions
-    # old_attr[7] - automount
-    # old_attr[8] - accounting subsystem
-    old_attr = all_attr[1].split(":")
-
-    # check for extended attributes
-    old_ext_attr = dict()
-    if len(all_attr) == 3:
-        attrs = re.sub(r"[()]", "", all_attr[2]).strip()
-        attrs = attrs.split(":")
-        for attr in attrs:
-            attr = attr.rsplit(" ", 1)
-            key = re.sub(" ", "_", attr[0]).lower()
-            old_ext_attr[key] = attr[1]
-
-    new_attr = dict()
-    attrs = module.params["attributes"]
-    if attrs:
-        for attr in attrs:
-            attr = attr.strip()
-            attr = attr.split("=")
-            new_attr[attr[0]] = attr[1]
-
-    # check if mount group changed
-    new_mnt_grp = module.params["mount_group"]
-    if new_mnt_grp:
-        old_mnt_grp = old_attr[4]
-        if new_mnt_grp != old_mnt_grp:
-            return True
-
-    # check if permissions changed
-    new_perms = module.params["permissions"]
-    if new_perms:
-        old_perms = old_attr[6].split(",")[0]
-        if new_perms != old_perms:
-            return True
-
-    # check if automount changed
-    new_amount = module.params["auto_mount"]
-    if new_amount is not None:
-        old_amount = old_attr[7]
-        new_amount = "yes" if new_amount else "no"
-        if new_amount != old_amount:
-            return True
-
-    # check in account subsystem changed
-    new_acct_sub_sys = module.params["account_subsystem"]
-    if new_acct_sub_sys is not None:
-        old_acct_sub_sys = old_attr[8]
-        new_acct_sub_sys = "yes" if new_acct_sub_sys else "no"
-        if new_acct_sub_sys != old_acct_sub_sys:
-            return True
-
-    # check filesystem size changes
-    if "size" in new_attr:
-        old_size = int(old_attr[5]) * 512
-        new_size = new_attr["size"]
-        if new_size[0] == "+" or new_size[0] == "-":
-            return True
-        if new_size[-1] == "M":
-            pass
-        elif new_size[-1] == "G":
-            new_size = int(new_size[:-1])
-            new_size *= 1073741824
-        if new_size != old_size:
-            return True
-
-    # check if ea format changes
-    if "ea" in new_attr and "eaformat" in old_ext_attr:
-        old_ea = old_ext_attr["eaformat"]
-        new_ea = new_attr["ea"]
-        if new_ea != old_ea:
-            return True
-
-    if "efs" in new_attr and "efs" in old_ext_attr:
-        old_efs = old_ext_attr["efs"]
-        new_efs = new_attr["efs"]
-        if new_efs != old_efs:
-            return True
-
-    if "managed" in new_attr and "dmapi" in old_ext_attr:
-        old_managed = old_ext_attr["dmapi"]
-        new_managed = new_attr["managed"]
-        if new_managed != old_managed:
-            return True
-
-    if "maxext" in new_attr and "maxext" in old_ext_attr:
-        old_maxext = old_ext_attr["maxext"]
-        new_maxext = new_attr["maxext"]
-        if new_maxext != old_maxext:
-            return True
-
-    if "mountguard" in new_attr and "mountguard" in old_ext_attr:
-        old_mountguard = old_ext_attr["mountguard"]
-        new_mountguard = new_attr["mountguard"]
-        if new_mountguard != old_mountguard:
-            return True
-
-    if "vix" in new_attr and "vix" in old_ext_attr:
-        old_vix = old_ext_attr["vix"]
-        new_vix = new_attr["vix"]
-        if new_vix != old_vix:
-            return True
-
-    return False
 
 
 def chfs(module, filesystem):
     """
     Changes the attributes of the filesystem.
     param module: Ansible module argument spec.
-    param device: Filesystem name.
+    param filesystem: Filesystem name.
     return: changed - True/False(filesystem state modified or not),
             msg - message
     """
-    global result
+    amount = module.params["auto_mount"]
+    perms = module.params["permissions"]
+    mgroup = module.params["mount_group"]
+    acct_sub_sys = module.params["account_subsystem"]
 
-    # check initial attributes
-    changed = check_attr_change(module, filesystem)
-    if not changed:
-        msg = "No changes needed in %s" % filesystem
-        result["msg"] = msg
-        result["rc"] = 0
-        return
+    # compare initial and the provided attributes. Exit if no change is required.
+    if module.params['attributes'] or amount or perms or mgroup or acct_sub_sys:
+        compare_attrs(module)
 
-    # build command to run
     opts = ""
-    if is_nfs(module, filesystem):
+    nfs = is_nfs(module, filesystem)
+    if nfs:
         opts = nfs_opts(module)
         device = module.params["device"]
         nfs_server = module.params["nfs_server"]
-        cmd = "chnfsmnt %s -f %s -d %s -h %s" % (opts, filesystem, device, nfs_server)
+        cmd = f"chnfsmnt {opts} -f {filesystem} -d {device} -h {nfs_server}"
     else:
-        # Modify Local Filesystem
         opts = fs_opts(module)
-        cmd = "chfs %s %s" % (opts, filesystem)
+        cmd = f"chfs {opts} {filesystem}"
 
     result["cmd"] = cmd
     rc, stdout, stderr = module.run_command(cmd)
-
     result["rc"] = rc
+
     if rc != 0:
-        msg = "Modification of filesystem '%s' failed. cmd - '%s'" % (filesystem, cmd)
+        msg = f"Modification of filesystem {filesystem} failed. cmd - {cmd}"
         result["msg"] = msg
         result["stdout"] = stdout
         result["stderr"] = stderr
         module.fail_json(**result)
 
-    msg = "Modification of filesystem '%s' completed" % filesystem
-    result["changed"] = True
+    msg = f"Modification of filesystem {filesystem} completed"
     result["msg"] = msg
+    result["changed"] = True
 
 
 def mkfs(module, filesystem):
@@ -444,40 +476,32 @@ def mkfs(module, filesystem):
     return: changed - True/False(filesystem state created or not),
             msg - message
     """
-    global result
 
     nfs_server = module.params['nfs_server']
-    perm = module.params['permissions']
     device = module.params['device']
     if device:
-        device = "-d %s " % device
+        device = f"-d {device} "
     else:
         device = ""
 
     if nfs_server:
         # Create NFS Filesystem
         opts = nfs_opts(module)
-        if perm is None:
-            opts += "-t rw"
 
-        cmd = "mknfsmnt -f '%s' %s -h '%s' %s -w bg " % \
-            (filesystem, device, nfs_server, opts)
+        cmd = f"mknfsmnt -f {filesystem} {device} -h {nfs_server} {opts} -w bg "
     else:
         # Create a local filesystem
         opts = fs_opts(module)
-        if perm is None:
-            opts += "-p rw"
 
         fs_type = module.params['fs_type']
 
         vg = module.params['vg']
         if vg:
-            vg = "-g %s " % vg
+            vg = f"-g {vg} "
         else:
             vg = ""
 
-        cmd = "crfs -v %s %s%s-m %s %s" % \
-            (fs_type, vg, device, filesystem, opts)
+        cmd = f"crfs -v {fs_type} {vg}{device}-m {filesystem} {opts}"
 
     result["cmd"] = cmd
 
@@ -485,17 +509,18 @@ def mkfs(module, filesystem):
     result["rc"] = rc
     if rc != 0:
         if nfs_server:
-            msg = "Creation of NFS filesystem %s failed. cmd - '%s'" % (filesystem, cmd)
+            msg = f"Creation of NFS filesystem {filesystem} failed. cmd - {cmd}"
         else:
-            msg = "Creation of filesystem %s failed. cmd - '%s'" % (filesystem, cmd)
+            msg = f"Creation of filesystem {filesystem} failed. cmd - {cmd}"
         result["stdout"] = stdout
         result["stderr"] = stderr
+        result["msg"] = msg
         module.fail_json(**result)
     else:
         if nfs_server:
-            msg = "Creation of NFS filesystem '%s' succeeded" % filesystem
+            msg = f"Creation of NFS filesystem {filesystem} succeeded"
         else:
-            msg = "Creation of filesystem '%s' succeeded" % filesystem
+            msg = f"Creation of filesystem {filesystem} succeeded"
         result["msg"] = msg
     result["changed"] = True
 
@@ -508,12 +533,10 @@ def rmfs(module, filesystem):
     return: changed - True/False(filesystem state modified or not),
             msg - message
     """
-    global result
 
     rm_mount_point = module.params["rm_mount_point"]
-    fs_type = is_nfs(module, filesystem)
 
-    if fs_type:
+    if is_nfs(module, filesystem):
         if rm_mount_point:
             cmd = "rmnfsmnt -B -f "
         else:
@@ -530,13 +553,13 @@ def rmfs(module, filesystem):
     rc, stdout, stderr = module.run_command(cmd)
     result["rc"] = rc
     if rc != 0:
-        msg = "Filesystem Removal for '%s' failed. cmd - '%s'" % (filesystem, cmd)
+        msg = f"Filesystem Removal for {filesystem} failed. cmd - {cmd}"
         result["msg"] = msg
         result["stdout"] = stdout
         result["stderr"] = stderr
         module.fail_json(**result)
 
-    msg = "Filesystem '%s' has been removed." % filesystem
+    msg = f"Filesystem {filesystem} has been removed."
     result["changed"] = True
     result["msg"] = msg
 
@@ -548,14 +571,15 @@ def main():
         supports_check_mode=False,
         argument_spec=dict(
             attributes=dict(type='list', elements='str'),
-            account_subsystem=dict(type='bool'),
-            auto_mount=dict(type='bool'),
+            account_subsystem=dict(type='str', choices=['yes', 'no']),
+            auto_mount=dict(type='str', choices=['yes', 'no']),
             device=dict(type='str'),
             vg=dict(type='str'),
             fs_type=dict(type='str', default='jfs2'),
             permissions=dict(type='str', choices=['rw', 'ro']),
             mount_group=dict(type='str'),
             nfs_server=dict(type='str'),
+            nfs_soft_mount=dict(type='bool', default='False'),
             state=dict(type='str', default='present', choices=['absent', 'present']),
             rm_mount_point=dict(type='bool', default='false'),
             filesystem=dict(type='str', required=True),
@@ -569,6 +593,18 @@ def main():
         stdout='',
         stderr='',
     )
+
+    attributes = module.params['attributes']
+    fs_type = module.params['fs_type']
+    nfs_soft_mount = module.params['nfs_soft_mount']
+
+    if attributes and fs_type == "nfs":
+        result['msg'] = "Attributes are not supported with this filesystem."
+        module.exit_json(**result)
+
+    if fs_type != "nfs" and nfs_soft_mount:
+        result['msg'] = "Soft mount is not supported with this filesystem."
+        module.exit_json(**result)
 
     state = module.params['state']
     filesystem = module.params['filesystem']
@@ -587,7 +623,7 @@ def main():
         else:
             rmfs(module, filesystem)
     else:
-        result["msg"] = "Invalid state '%s'" % state
+        result["msg"] = f"Invalid state {state}"
 
     module.exit_json(**result)
 

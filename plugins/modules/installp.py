@@ -19,10 +19,10 @@ module: installp
 short_description: Installs and updates software.
 description:
 - Installs available software products in a compatible installation package.
-version_added: '2.9'
+version_added: '0.4.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - 'Privileged user with authorization: B(aix.system.install)'
 options:
   action:
@@ -160,14 +160,14 @@ EXAMPLES = r'''
 
 - name: Install all filesets within the bos.net software package and expand file systems if necessary
   ibm.power_aix.installp:
-    extend_fs: yes
+    extend_fs: true
     device: /usr/sys/inst.images
     install_list: bos.net
 
 - name: Reinstall and commit the NFS software product option that is already installed on the system at the same level
   ibm.power_aix.installp:
-    commit: yes
-    force: yes
+    commit: true
+    force: true
     device: /dev/rmt0.1
     install_list: bos.net.nfs.client:4.1.0.0
 
@@ -195,54 +195,55 @@ stdout:
     description: The standard output.
     returned: always
     type: str
-    sample: "
-        *******************************************************************************\n
-        installp PREVIEW:  deinstall operation will not actually occur.\n
-        *******************************************************************************\n
-        \n
-        +-----------------------------------------------------------------------------+\n
-                            Pre-deinstall Verification...\n
-        +-----------------------------------------------------------------------------+\n
-        Verifying selections...done\n
-        Verifying requisites...done\n
-        Results...\n
-        \n
-        WARNINGS\n
-        --------\n
-          Problems described in this section are not likely to be the source of any\n
-          immediate or serious failures, but further actions may be necessary or\n
-          desired.\n
-        \n
-          Not Installed\n
-          -------------\n
-          No software could be found on the system that could be deinstalled for the\n
-          following requests:\n
-        \n
-            bos.sysmgt.nim.master                    \n
-        \n
-          (The fileset may not be currently installed, or you may have made a\n
-           typographical error.)\n
-        \n
-          << End of Warning Section >>\n
-        \n
-        FILESET STATISTICS \n
-        ------------------\n
-            1  Selected to be deinstalled, of which:\n
-                1  FAILED pre-deinstall verification\n
-          ----\n
-            0  Total to be deinstalled\n
-        \n
-        \n
-        ******************************************************************************\n
-        End of installp PREVIEW.  No deinstall operation has actually occurred.\n
-        ******************************************************************************"
+    sample:
+      '*******************************************************************************\n
+      installp PREVIEW:  deinstall operation will not actually occur.\n
+      *******************************************************************************\n
+      \n
+      +-----------------------------------------------------------------------------+\n
+                          Pre-deinstall Verification...\n
+      +-----------------------------------------------------------------------------+\n
+      Verifying selections...done\n
+      Verifying requisites...done\n
+      Results...\n
+      \n
+      WARNINGS\n
+      --------\n
+        Problems described in this section are not likely to be the source of any\n
+        immediate or serious failures, but further actions may be necessary or\n
+        desired.\n
+      \n
+        Not Installed\n
+        -------------\n
+        No software could be found on the system that could be deinstalled for the\n
+        following requests:\n
+      \n
+          bos.sysmgt.nim.master                    \n
+      \n
+        (The fileset may not be currently installed, or you may have made a\n
+         typographical error.)\n
+      \n
+        << End of Warning Section >>\n
+      \n
+      FILESET STATISTICS \n
+      ------------------\n
+          1  Selected to be deinstalled, of which:\n
+              1  FAILED pre-deinstall verification\n
+        ----\n
+          0  Total to be deinstalled\n
+      \n
+      \n
+      ******************************************************************************\n
+      End of installp PREVIEW.  No deinstall operation has actually occurred.\n
+      ******************************************************************************'
 stderr:
     description: The standard error.
     returned: always
     type: str
-    sample: "installp: Device /dev/rfd0 could not be accessed.\nSpecify a valid device name."
+    sample: 'installp: Device /dev/rfd0 could not be accessed.\nSpecify a valid device name.'
 '''
 
+import re
 from ansible.module_utils.basic import AnsibleModule
 
 
@@ -364,13 +365,23 @@ def main():
     result['rc'] = rc
     result['stdout'] = stdout
     result['stderr'] = stderr
+
     if rc != 0:
-        result['msg'] = 'installp \'{0}\' failed.'.format(action)
+        result['msg'] = f'installp {action} failed.'
         module.fail_json(**result)
 
-    result['msg'] = 'installp \'{0}\' successful.'.format(action)
+    result['msg'] = f'installp {action} successful.'
     if action in ['apply', 'commit', 'reject', 'deinstall', 'cleanup']:
         result['changed'] = True
+
+    # check if anything changed
+    pattern = r"(Already Installed|Not Installed|Not Committable|\
+      Not Rejectable|Nothing to Commit|0503-439)"
+    if not re.search(r"SUCCESSES", stdout) and\
+            not re.search(r"SUCCESS", stderr) and\
+            (re.search(pattern, stdout) or re.search(pattern, stderr)):
+        result['changed'] = False
+
     module.exit_json(**result)
 
 

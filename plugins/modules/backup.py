@@ -5,7 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
-__metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
@@ -24,10 +23,10 @@ description:
 - It uses restvg or alt_disk_mksysb to restore a backup image to disk(s).
 - mksysb and alt_disk_mksysb operate on system volume group creating and restoring installable
   backup image while savevg and restvg operate on data volume group.
-version_added: '2.9'
+version_added: '1.1.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - 'Privileged user with authorization: B(aix.system.install)'
 options:
   action:
@@ -98,7 +97,7 @@ options:
     - Specifies the phase(s) to execute during the invocation of the alt_disk_mksysb command.
     - Can be used if I(action=restore) or I(type=mksysb).
     type: str
-    choices: [ 1, 2, 3, 12, 23, all ]
+    choices: [ '1', '2', '3', '12', '23', 'all' ]
   data_file:
     description:
     - Specifies a full path filename to use instead of the one from the image being restored.
@@ -186,7 +185,7 @@ options:
     default: no
   extend_fs:
     description:
-    - Specifies to extend the filesystem if needed.
+    - Specifies to extend the '/tmp' filesystem if needed.
     - Can be used if I(action=create).
     type: bool
     default: no
@@ -211,8 +210,8 @@ notes:
     JFS-mounted file system data will be backed up. Raw logical volume data will NOT be backed up
     using a savevg.
   - C(savevg) only backs up varied-on volume group. The file systems must be mounted.
-  - This M(backup) module only operates on LPAR, for operation on VIOS, please checkout the
-    M(backupios) module in the power-vios collection.
+  - This M(ibm.power_aix.backup) module only operates on LPAR, for operation on VIOS, please checkout the
+    M(ibm.power_vios.backupios) module in the power-vios collection.
   - You can refer to the IBM documentation for additional information on the commands used at
     U(U(https://www.ibm.com/support/knowledgecenter/ssw_aix_72/a_commands/alt_disk_mksysb.html),
     U(U(https://www.ibm.com/support/knowledgecenter/ssw_aix_72/l_commands/lsmksysb.html),
@@ -223,59 +222,59 @@ notes:
 
 EXAMPLES = r'''
 - name: backup the rootvg with mksysb
-  backup:
+  ibm.power_aix.backup:
     action: create
     type: mksysb
     location: /tmp/backup_rootvg
     exclude_files: false
-    extend_fs: yes
+    extend_fs: true
 
 - name: install the mksysb image to /dev/hdisk1 using the 64 bits kernel if possible
-  backup:
+  ibm.power_aix.backup:
     action: restore
     type: mksysb
     location: /ESSAI/backup_datavg
     disk: /dev/hdisk1
     flags: '-K'
 
-- name: savevg of rootvg to /dev/hdisk1
-  backup:
+- name: savevg of rootvg to /dev/rmt1
+  ibm.power_aix.backup:
     action: create
     type: savevg
     name: rootvg
-    location: /dav/rmt1
-    exclude_data: no
-    exclude_files: no
+    location: /dev/rmt1
+    exclude_data: false
+    exclude_files: false
     exclude_fs: /tmp/exclude_fs_list
-    create_data_file: yes
-    extend_fs: yes
-    verbose: yes
+    create_data_file: true
+    extend_fs: true
+    verbose: true
 
-- name: savevg of datavg structure to /dev/hdisk2
-  backup:
+- name: savevg of datavg structure to /dev/backup_datavg
+  ibm.power_aix.backup:
     action: create
     type: savevg
     name: datavg
     location: /tmp/backup_datavg
-    exclude_data: yes
-    exclude_files: yes
-    create_data_file: yes
+    exclude_data: true
+    exclude_files: true
+    create_data_file: true
 
 - name: view the vg backup image stored on /dev/hdisk1 with savevg
-  backup:
+  ibm.power_aix.backup:
     action: view
     type: savevg
     location: /dev/hdisk1
 
 - name: restvg to restore datavg structure only to /dev/hdisk2
-  backup:
+  ibm.power_aix.backup:
     action: restore
     type: savevg
     name: datavg
     location: /tmp/backup_datavg
     data_file: /tmp/datavg.mydata
-    exclude_data: yes
-    minimize_lv_size: yes
+    exclude_data: true
+    minimize_lv_size: true
     flags: '-n'
 '''
 
@@ -291,7 +290,6 @@ cmd:
     returned: when the command is run.
     type: str
     sample: '/bin/restvg -f /dev/rmt0 -l'
-
 stdout:
     description: The standard output of the command.
     returned: always
@@ -315,7 +313,6 @@ stderr:
        Target Disks:	  Allocation Policy:
                 Shrink Filesystems:	yes
                 Preserve Physical Partitions for each Logical Volume:	no
-
        New volume on /tmp/datavg_backup:
         Cluster 51200 bytes (100 blocks).
            Volume number 1
@@ -332,7 +329,12 @@ rc:
     sample: 0
 '''
 
+import re
 from ansible.module_utils.basic import AnsibleModule
+__metaclass__ = type
+
+
+results = None
 
 
 def check_vg(module, vg):
@@ -346,27 +348,27 @@ def check_vg(module, vg):
         True if the vg can be used
         False otherwise
     """
-    global results
-    module.log('Checking {0} is active.'.format(vg))
+
+    module.log(f'Checking {vg} is active.')
 
     # list active volume groups
     cmd = ['/usr/sbin/lsvg', '-o']
     rc, stdout, stderr = module.run_command(cmd)
     if rc != 0:
-        results['msg'] = 'Cannot get active volume group. Command \'{0}\' failed.'.format(cmd)
+        results['msg'] = f'Cannot get active volume group. Command \'{cmd}\' failed.'
         results['stdout'] = stdout
         results['stderr'] = stderr
         results['rc'] = rc
         return False
 
     vgs = stdout.splitlines()
-    module.log('Active volume groups are: {0}'.format(vgs))
+    module.log(f'Active volume groups are: {vgs}')
     if vg in vgs:
-        module.debug('volume group {0} is active'.format(vg))
+        module.debug(f'volume group {vg} is active')
         return True
-    else:
-        results['msg'] = 'Volume group {0} is not active. Active volume groups are: {1}. Please vary on the volume group.'.format(vg, vgs)
-        return False
+    results['msg'] = f'Volume group {vg} is not active. Active volume groups are: {vgs}.\
+          Please vary on the volume group.'
+    return False
 
 
 def mksysb(module, params):
@@ -379,28 +381,58 @@ def mksysb(module, params):
     return:
         rc       (int): the return code of the command
     """
-    global results
+
     module.log('Creating OS backup with mksysb.')
+
+    # Check if the backup image already exists
+    if not params['force']:
+        vg = "rootvg"
+        rc = lsmksysb(module, params)
+        # check if there is an existing backup specified by 'location' parameter
+        # if there is not existing backup at 'location' then proceed to creation of backup
+        # 0512-054 listvgbackup: File /tmp/testvg_backup does not exist or is empty.
+        pattern = r"0512-054"
+        found = re.search(pattern, results['stdout'])
+        if found:
+            module.log('Backup file does not exist or empty proceed to mksysb.')
+        elif rc == 0:
+            vg_name = [s for s in results['stdout'].splitlines()
+                       if "VOLUME GROUP:" in s][0].split(':')[1].strip()
+            if vg_name == vg:
+                results['msg'] = f'Backup images for {vg} already exists. User force to overwrite'
+                return 0
+            results['msg'] = f'Backup images already exists for {vg_name} volume group '
+            results['msg'] += 'on the specified location. Use force to overwrite.'
+            return 1
+        else:
+            results['msg'] = f'Cannot check {vg} backup image existence.'
+            return rc
 
     # mksysb  device | file
     # [ -e ]          Excludes files specified in the /etc/exclude.vgname file from being backed up.
-    # [ -i | -m ]     Create the image.data file calling mkszfile to get VG, LV, PV, PS info (-m for map file).
-    # [ -P ]          Excludes files that are listed line by line in predifined files from being packed.
+    # [ -i | -m ]     Create the image.data file calling mkszfile to get VG,
+    #                 LV, PV, PS info (-m for map file).
+    # [ -P ]          Excludes files that are listed line by line in predifined files
+    #                 from being packed.
     # [ -v ]          Verbose mode.
     # [-x file]       Exclude fs listed in the file (one per line).
     # [ -X ]          Extend fs if needed.
     # not yet implemented:
     # [ -a ]          Does not back up extended attributes or NFSv4 ACLs.
     # [ -A ]          Backs up DMAPI file system files.
-    # [ -b number ]   Specifies the number of 512-byte blocks to write in a single output operation.
-    # [ -F filename ] Specifies a previously created mksysb from which a backup tape is created to try to make the tape bootable.
+    # [ -b number ]   Specifies the number of 512-byte blocks to write in a single
+    #                 output operation.
+    # [ -F filename ] Specifies a previously created mksysb from which a backup tape
+    #                 is created to try to make the tape bootable.
     # [ -G | -N ]     Excludes|Includes WPAR file systems from|to the system backup.
     # [-M]            Creates a backup file that is intended for use with the multibos command.
     # [ -p ]          Disable software packing (tape drives).
-    # [ -t path ]     Directory or file system to create a boot image from the mksysb file specified by the -F flag.
+    # [ -t path ]     Directory or file system to create a boot image from the mksysb
+    #                 file specified by the -F flag.
     # [ -T ]          Create backup using snapshots.
     # [ -V ]          Verify a tape backup.
-    # [ -Z ]          Does not back up the EFS information for all the files, directories, and file systems.
+    # [ -Z ]          Does not back up the EFS information for all the files, directories,
+    #                 and file systems.
 
     cmd = ['/bin/mksysb']
     if params['create_data_file'].lower() == 'mapfile':
@@ -422,7 +454,7 @@ def mksysb(module, params):
             cmd += [f]
     cmd += [params['location']]
 
-    module.log('running command: {0}'.format(cmd))
+    module.log(f'running command: {cmd}')
     rc, stdout, stderr = module.run_command(cmd)
     results['cmd'] = ' '.join(cmd)
     results['stdout'] = stdout
@@ -443,16 +475,20 @@ def alt_disk_mksysb(module, params):
     return:
         rc       (int): the return code of the command
     """
-    global results
+
     module.log('Restoring OS backup with alt_disk_mksysb.')
 
     # alt_disk_mksysb -m device -d target_disks...
-    # [ -m device ]       Location of the mksysb. It can be a tape device (/dev/rmt0) or a path in the filesystem.
+    # [ -m device ]       Location of the mksysb. It can be a tape device (/dev/rmt0)
+    #                     or a path in the filesystem.
     # [ -d target_disks ] Space delimited list of disk where the alternate rootvg is created.
     # [ -s script ]       Customization script to run at the end of the mksysb install.
-    # [ -R resolv_conf ]  Full path of resolv.conf file that replace the existing one after after the mksysb has been restored.
-    # [ -i image.data ]   Full path of image.data to use instead of the default file from mksysb image.
-    # [ -P phase_option ] Phase(s) to execute during this invocation of the alt_disk_mksysb command. Can be 1,2,3,12,23,all.
+    # [ -R resolv_conf ]  Full path of resolv.conf file that replace the existing one after
+    #                     after the mksysb has been restored.
+    # [ -i image.data ]   Full path of image.data to use instead of the default file
+    #                     from mksysb image.
+    # [ -P phase_option ] Phase(s) to execute during this invocation of the
+    #                     alt_disk_mksysb command. Can be 1,2,3,12,23,all.
     # [ -n ]    Remains NIM client.
     # [ -B ]    Does not run bootlist after the operation. Invalid with -r.
     # [ -y ]    Looks for and import (if found) mksysb volume group.
@@ -461,7 +497,8 @@ def alt_disk_mksysb(module, params):
     # not yet implemented:
     # [ -p platform ]     Platform used to create the name of the disk boot image.
     # [ -L mksysb_level ] Level is combined with the platform type to create the boot image name.
-    # [ -c console ]      Device name to be used as the alternate rootvg's system console. Valid with -O.
+    # [ -c console ]      Device name to be used as the alternate rootvg's system console.
+    #                     Valid with -O.
     # [ -K ]    Uses the 64 bits kernel if possible.
     # [ -O ]    Performs a device reset on the target alinst_rootvg.
     # [ -g ]    Overlooks the bootable checks for the target_disks
@@ -470,13 +507,17 @@ def alt_disk_mksysb(module, params):
     # [ -z ]    Does not import any type of non-rootvg. Overrides -y.
     # [ -T ]    Converts JSF file systems to JFS2 while recreating the rootvg on target disks.
     # [ -S ]    Skips space-checking on target disks before clone or install operation.
-    # [ -C ]    Uses the /usr/lpp/bos.alt_disk_install/boot_images/bosboot.disk.chrp file from the current rootvg only.
+    # [ -C ]    Uses the /usr/lpp/bos.alt_disk_install/boot_images/bosboot.disk.chrp
+    #           file from the current rootvg only.
+
+    if params['disk'] and len(params['disk']) > 1:
+        cmd_disk = ' '.join(params['disk'])
     cmd = ['/usr/sbin/alt_disk_mksysb']
     cmd += ['-m', params['location']]
     if len(params['disk']) == 1:
         cmd += ['-d', params['disk'][0]]
     else:
-        cmd += ['-d', '"{0}"'.format(' '.join(params['disk']))]
+        cmd += ['-d', cmd_disk]
     if params['script']:
         cmd += ['-s', params['script']]
     if params['resolv_conf']:
@@ -499,7 +540,7 @@ def alt_disk_mksysb(module, params):
         for f in params['flags'].split(' '):
             cmd += [f]
 
-    module.log('running command: {0}'.format(cmd))
+    module.log(f'running command: {cmd}')
     rc, stdout, stderr = module.run_command(cmd)
     results['cmd'] = ' '.join(cmd)
     results['stdout'] = stdout
@@ -520,17 +561,18 @@ def lsmksysb(module, params):
     return:
         rc       (int): the return code of the command
     """
-    global results
+
     module.log('Viewing OS backup information with lsmksysb.')
 
     # lsmksysb [ -f device ][ -l ]
     # not yet implemented:
-    # [ -a ] [ -b blocks ] [ -c ] [ -n ] [ -r ] [ -s ] [ -d path ] [ -B ] [ -D ] [ -L ] [ -V ] [ file_list ]
+    # [ -a ] [ -b blocks ] [ -c ] [ -n ] [ -r ] [ -s ] [ -d path ]
+    # [ -B ] [ -D ] [ -L ] [ -V ] [ file_list ]
     cmd = ['/bin/lsmksysb', '-l']
     if params['location'].strip():
         cmd += ['-f', params['location']]
 
-    module.log('running command: {0}'.format(cmd))
+    module.log(f'running command: {cmd}')
     rc, stdout, stderr = module.run_command(cmd)
     results['cmd'] = ' '.join(cmd)
     results['stdout'] = stdout
@@ -551,22 +593,30 @@ def savevg(module, params, vg):
     return:
         rc       (int): the return code of the command
     """
-    global results
-    module.log('Creating VG backup of {0} with savevg.'.format(vg))
+
+    module.log(f'Creating VG backup of {vg} with savevg.')
 
     # Check if the backup image already exists
     if not params['force']:
         rc = restvg_view(module, params)
-        if rc == 0:
-            vg_name = [s for s in results['stdout'].splitlines() if "VOLUME GROUP:" in s][0].split(':')[1].strip()
+        # check if there is an existing backup specified by 'location' parameter
+        # if there is not existing backup at 'location' then proceed to creation of backup
+        # 0512-054 listvgbackup: File /tmp/testvg_backup does not exist or is empty.
+        pattern = r"0512-054"
+        found = re.search(pattern, results['stdout'])
+        if found:
+            module.log('Backup file does not exist or empty proceed to savevg.')
+        elif rc == 0:
+            vg_name = [s for s in results['stdout'].splitlines()
+                       if "VOLUME GROUP:" in s][0].split(':')[1].strip()
             if vg_name == vg:
-                results['msg'] = 'Backup images for {0} already exists.'.format(vg)
+                results['msg'] = f'Backup images for {vg} already exists. Use force to overwrite'
                 return 0
-            else:
-                results['msg'] = 'Backup images already exists for {0} volume group. Use force to overwrite.'.format(vg_name)
-                return 1
+            results['msg'] = f'Backup images already exists for {vg_name} volume group '
+            results['msg'] += 'on the specified location. Use force to overwrite.'
+            return 1
         else:
-            results['msg'] = 'Cannot check {0} backup image existence.'.format(vg)
+            results['msg'] = f'Cannot check {vg} backup image existence.'
             return rc
 
     if not check_vg(module, vg):
@@ -576,7 +626,8 @@ def savevg(module, params, vg):
     # [ -e ]        Excludes files specified in the /etc/exclude.vgname file from being backed up.
     # [ -f Device ] Device of file to store the image. Default is I(/dev/rmt0).
     # [ -i | -m ]   Create the data file calling mkvgdata (-m for map file).
-    # [ -r ]        Backs up user VG inforamtion and administration data files. Does not back up user data files.
+    # [ -r ]        Backs up user VG inforamtion and administration data files.
+    #               Does not back up user data files.
     # [ -v ]        Verbose mode.
     # [-x file]     Exclude fs listed in the file (one per line).
     # [ -X ]        Extend fs if needed.
@@ -587,7 +638,8 @@ def savevg(module, params, vg):
     # [ -p ]        Disable software packing (tape drives).
     # [ -T ]        Create backup using snapshots.
     # [ -V ]        Verify a tape backup.
-    # [ -Z ]        Does not back up the EFS information for all the files, directories, and file systems.
+    # [ -Z ]        Does not back up the EFS information for all the files,
+    #               directories, and file systems.
     cmd = ['/bin/savevg']
     if params['exclude_files']:
         cmd += ['-e']
@@ -610,7 +662,7 @@ def savevg(module, params, vg):
             cmd += [f]
     cmd += [vg]
 
-    module.log('running command: {0}'.format(cmd))
+    module.log(f'running command: {cmd}')
     rc, stdout, stderr = module.run_command(cmd)
     results['cmd'] = ' '.join(cmd)
     results['stdout'] = stdout
@@ -633,17 +685,20 @@ def restvg(module, params, action, disk):
     return:
         rc       (int): the return code of the command
     """
-    global results
-    module.log('VG backup {0} on {1} with restvg.'.format(action, disk))
+
+    module.log(f'VG backup {action} on {disk} with restvg.')
 
     # restvg [DiskName]
-    # [ -d FileName ]   Uses a file (absolute or relative path) instead of the vgname.data file in the backup image.
+    # [ -d FileName ]   Uses a file (absolute or relative path) instead of the vgname.
+    #                   data file in the backup image.
     # [ -f Device ]     Device name of the backup media. Default is I(/dev/rmt0).
-    # [ -q ]            Does not display the VG name and target disk device name usual prompt before restoration.
+    # [ -q ]            Does not display the VG name and target disk device name
+    #                   usual prompt before restoration.
     # [ -r ]            Recreates a VG structure only without restoring any files or data.
     # [ -s ]            Creates the LV with minimum size possible to accomodate the file system.
     # not yet implemented:
-    # [ -b Blocks ]     Specifies the number of 512-byte blocks to write in a single output operation
+    # [ -b Blocks ]     Specifies the number of 512-byte blocks to write in a
+    #                   single output operation
     # [ -n ]            Ignores the existing MAP files.
     # [ -P PPsize ]     Specifies the number of megabytes in each physical partition.
     cmd = ['/bin/restvg']
@@ -663,7 +718,7 @@ def restvg(module, params, action, disk):
     if disk:
         cmd += [disk]
 
-    module.log('running command: {0}'.format(cmd))
+    module.log(f'running command: {cmd}')
     rc, stdout, stderr = module.run_command(cmd)
     results['cmd'] = ' '.join(cmd)
     results['stdout'] = stdout
@@ -684,19 +739,20 @@ def restvg_view(module, params):
     return:
         rc       (int): the return code of the command
     """
-    global results
 
     location = params['location'].strip()
     if not location:
         location = '/dev/rmt0'
-    module.log('View VG backup {0} with restvg.'.format(location))
+    module.log(f'View VG backup {location} with restvg.')
 
     # restvg -f Device -l
-    # [ -f Device ]     Device of file to store the image. Default is I(/dev/rmt0).
-    # [ -l ]            Displays useful information about a volume group backup. Used when action is 'view'.
+    # [ -f Device ]     Device of file to store the image.
+    #                   Default is I(/dev/rmt0).
+    # [ -l ]            Displays useful information about a volume group backup.
+    #                   Used when action is 'view'.
     cmd = ['/bin/restvg', '-f', location, '-l']
 
-    module.log('running command: {0}'.format(cmd))
+    module.log(f'running command: {cmd}')
     rc, stdout, stderr = module.run_command(cmd)
     results['cmd'] = ' '.join(cmd)
     results['stdout'] = stdout
@@ -756,6 +812,7 @@ def main():
         stderr='',
         rc=-1,
     )
+    rc = -1
 
     params = {}
     action = module.params['action']
@@ -769,6 +826,7 @@ def main():
         params['exclude_fs'] = module.params['exclude_fs']
         params['exclude_files'] = module.params['exclude_files']
         params['extend_fs'] = module.params['extend_fs']
+        params['force'] = module.params['force']
 
         if params['objtype'] == 'mksysb':
             params['exclude_packing_files'] = module.params['exclude_packing_files']
@@ -778,13 +836,12 @@ def main():
         elif params['objtype'] == 'savevg':
             params['name'] = module.params['name']
             params['exclude_data'] = module.params['exclude_data']
-            params['force'] = module.params['force']
 
             if not params['name']:
-                results['msg'] = 'Missing parameter: action is {0} but argument \'name\' is missing.'.format(action)
+                results['msg'] = 'argument \'name\' is missing.'
                 module.fail_json(**results)
             if params['exclude_data'] and params['name'] == 'rootvg':
-                results['msg'] = 'Bad parameter: exclude_data is {0}, name cannot be \'rootvg\'.'.format(params['exclude_data'])
+                results['msg'] = 'name cannot be \'rootvg\'.'
                 module.fail_json(**results)
 
             rc = savevg(module, params, params['name'])
@@ -804,7 +861,7 @@ def main():
             params['bootlist'] = module.params['bootlist']
 
             if not params['disk']:
-                results['msg'] = 'Missing parameter: action is {0} but argument \'disk\' is missing.'.format(action)
+                results['msg'] = 'Argument \'disk\' is missing.'
                 module.fail_json(**results)
 
             rc = alt_disk_mksysb(module, params)
@@ -819,19 +876,19 @@ def main():
     elif action == 'view':
         params['location'] = module.params['location']
         if params['objtype'] == 'mksysb':
-            rc = restvg_view(module, params)
-        elif params['objtype'] == 'savevg':
             rc = lsmksysb(module, params)
+        elif params['objtype'] == 'savevg':
+            rc = restvg_view(module, params)
 
     if rc == 0:
         if not results['msg']:
-            msg = 'AIX {0} backup operation successfull.'.format(action)
+            msg = f'AIX {action} backup operation successful.'
             results['msg'] = msg
         module.log(results['msg'])
         module.exit_json(**results)
     else:
         if not results['msg']:
-            results['msg'] = 'AIX {0} backup operation failed.'.format(action)
+            results['msg'] = f'AIX {action} backup operation failed.'
         module.log(results['msg'])
         module.fail_json(**results)
 

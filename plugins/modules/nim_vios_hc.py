@@ -23,10 +23,10 @@ description:
 - In the current version, it validates the vSCSI, NPIv, SEA mappings configurations and vNIC
   configurations (when set) so the update of the VIOS pair can be attempted. The SSP configuration
   is not checked yet, that is not required so far.
-version_added: '2.9'
+version_added: '0.4.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - The B(vioshc.py) script must be installed on the NIM master.
 - 'Privileged user with authorizations: B(aix.system.install,aix.system.nim.config.server)'
 options:
@@ -55,8 +55,8 @@ EXAMPLES = r'''
 - name: Perform a health check on dual VIOSes vios1,vios2 and on VIOS vios3
   nim_vios_hc:
     targets:
-    - vios1,vios2
-    - vios3
+      - vios1,vios2
+      - vios3
     action: health_check
 '''
 
@@ -81,11 +81,13 @@ status:
 '''
 
 import re
+import os
 
 from ansible.module_utils.basic import AnsibleModule
 
 OUTPUT = []
 NIM_NODE = {}
+results = None
 
 
 def get_hmc_info(module):
@@ -96,10 +98,10 @@ def get_hmc_info(module):
     """
     info_hash = {}
 
-    cmd = ['lsnim', '-t', 'hmc', '-l']
+    cmd = ['/usr/sbin/lsnim', '-t', 'hmc', '-l']
     ret, stdout, stderr = module.run_command(cmd)
     if ret != 0:
-        msg = 'Failed to get HMC NIM info, lsnim returned {0}: {1}'.format(ret, stderr)
+        msg = f'Failed to get HMC NIM info, lsnim returned {ret}: {stderr}'
         module.log(msg)
         OUTPUT.append(msg)
         return info_hash
@@ -148,10 +150,10 @@ def get_nim_cecs_info(module):
     """
     info_hash = {}
 
-    cmd = ['lsnim', '-t', 'cec', '-l']
+    cmd = ['/usr/sbin/lsnim', '-t', 'cec', '-l']
     ret, stdout, stderr = module.run_command(cmd)
     if ret != 0:
-        msg = 'Failed to get CEC NIM info, lsnim returned {0}: {1}'.format(ret, stderr)
+        msg = f'Failed to get CEC NIM info, lsnim returned {ret}: {stderr}'
         module.log(msg)
         OUTPUT.append(msg)
         return info_hash
@@ -184,10 +186,10 @@ def get_nim_clients_info(module, lpar_type):
     """
     info_hash = {}
 
-    cmd = ['lsnim', '-t', lpar_type, '-l']
+    cmd = ['/usr/sbin/lsnim', '-t', lpar_type, '-l']
     ret, stdout, stderr = module.run_command(cmd)
     if ret != 0:
-        msg = 'Failed to get NIM clients info, lsnim returned: {0}'.format(stderr)
+        msg = f'Failed to get NIM clients info, lsnim returned: {stderr}'
         module.log(msg)
         OUTPUT.append(msg)
         return info_hash
@@ -229,12 +231,10 @@ def build_nim_node(module):
     Build the nim node containing the nim vios and hmc info.
     """
 
-    global NIM_NODE
-
     # Build hmc info list
     nim_hmc = get_hmc_info(module)
     NIM_NODE['nim_hmc'] = nim_hmc
-    module.debug('NIM HMC: {0}'.format(nim_hmc))
+    module.debug(f'NIM HMC: {nim_hmc}')
 
     # Build CEC info list
     nim_cec = get_nim_cecs_info(module)
@@ -243,13 +243,13 @@ def build_nim_node(module):
     nim_vios = get_nim_clients_info(module, 'vios')
 
     # Complete the CEC serial in nim_vios dict
-    for key in nim_vios:
-        mgmt_cec = nim_vios[key]['mgmt_cec']
+    for key, nimvios in nim_vios.items():
+        mgmt_cec = nimvios['mgmt_cec']
         if mgmt_cec in nim_cec:
-            nim_vios[key]['mgmt_cec_serial'] = nim_cec[mgmt_cec]['serial']
+            nimvios['mgmt_cec_serial'] = nim_cec[mgmt_cec]['serial']
 
     NIM_NODE['nim_vios'] = nim_vios
-    module.debug('NIM VIOS: {0}'.format(nim_vios))
+    module.debug(f'NIM VIOS: {nim_vios}')
 
 
 def nim_exec(module, node, command):
@@ -262,10 +262,11 @@ def nim_exec(module, node, command):
         - stderr  stderr of the command
     """
 
-    rcmd = '( LC_ALL=C {0} ); echo rc=$?'.format(' '.join(command))
+    cmd = ' '.join(command)
+    rcmd = f'( LC_ALL=C {cmd} ); echo rc=$?'
     cmd = ['/usr/lpp/bos.sysmgt/nim/methods/c_rsh', node, rcmd]
 
-    module.debug('exec command:{0}'.format(cmd))
+    module.debug(f'exec command:{cmd}')
 
     ret, stdout, stderr = module.run_command(cmd)
     if ret != 0:
@@ -277,7 +278,7 @@ def nim_exec(module, node, command):
         # remove the rc of c_rsh with echo $?
         stdout = re.sub(r'rc=[-\d]+\n$', '', stdout)
 
-    module.debug('exec command rc:{0}, output:{1}, stderr:{2}'.format(ret, stdout, stderr))
+    module.debug(f'exec command rc:{ret}, output:{stdout}, stderr:{stderr}')
 
     return (ret, stdout, stderr)
 
@@ -295,7 +296,6 @@ def check_vios_targets(module, targets):
 
     return: the list of the existing vios tuple matching the target list
     """
-    global NIM_NODE
 
     vios_list = {}
     vios_list_tuples_res = []
@@ -303,28 +303,25 @@ def check_vios_targets(module, targets):
     # Build target list
     for vios_tuple in targets:
 
-        module.debug('vios_tuple: {0}'.format(vios_tuple))
+        module.debug(f'vios_tuple: {vios_tuple}')
 
         tuple_elts = list(set(vios_tuple.split(',')))
         tuple_len = len(tuple_elts)
 
         if tuple_len != 1 and tuple_len != 2:
-            module.log('Malformed VIOS targets {0}. Tuple {1} should have one or two elements.'
-                       .format(targets, tuple_elts))
+            module.log(f'Malformed VIOS targets {targets}. Tuple {tuple_elts} should have one or two elements.')
             return None
 
         # check vios not already exists in the target list
         if tuple_elts[0] in vios_list or (tuple_len == 2 and (tuple_elts[1] in vios_list
                                                               or tuple_elts[0] == tuple_elts[1])):
-            module.log('Malformed VIOS targets {0}. Duplicated VIOS'
-                       .format(targets))
+            module.log(f'Malformed VIOS targets {targets}. Duplicated VIOS')
             return None
 
         # check vios is known by the NIM master - if not ignore it
         if tuple_elts[0] not in NIM_NODE['nim_vios'] or \
            (tuple_len == 2 and tuple_elts[1] not in NIM_NODE['nim_vios']):
-            module.log('skipping {0} as VIOS not known by the NIM master.'
-                       .format(vios_tuple))
+            module.log(f'skipping {vios_tuple} as VIOS not known by the NIM master.')
             continue
 
         # check vios connectivity
@@ -334,8 +331,7 @@ def check_vios_targets(module, targets):
             ret, stdout, stderr = nim_exec(module, NIM_NODE['nim_vios'][vios]['vios_ip'], cmd)
             if ret != 0:
                 res = 1
-                msg = 'skipping {0}: cannot reach {1} with c_rsh: {2}, {3}, {4}'\
-                      .format(vios_tuple, vios, res, stdout, stderr)
+                msg = f'skipping {vios_tuple}: cannot reach {vios} with c_rsh: {res}, {stdout}, {stderr}'
                 module.log(msg)
                 continue
         if res != 0:
@@ -367,33 +363,31 @@ def vios_health(module, mgmt_sys_uuid, hmc_ip, vios_uuids):
     return: 0 if ok,
             1 otherwise
     """
-    module.debug('hmc_ip: {0} vios_uuids: {1}'.format(hmc_ip, vios_uuids))
-
+    module.debug(f'hmc_ip: {hmc_ip} vios_uuids: {vios_uuids}')
     # Build the vioshc cmd
-    cmd = [vioshc_cmd, '-i', hmc_ip, '-m', mgmt_sys_uuid]
+    cmd = [vioshc_interpreter, vioshc_cmd, '-i', hmc_ip, '-m', mgmt_sys_uuid]
     for uuid in vios_uuids:
         cmd.extend(['-U', uuid])
     if module._verbosity > 0:
         cmd.extend(['-' + 'v' * module._verbosity])
         if module._verbosity >= 3:
             cmd.extend(['-D'])
-
-    ret, stdout, stderr = module.run_command(cmd)
+    # path prefix is used here to ensure the dependent module paths are present.
+    # In this case, curl module.
+    ret, stdout, stderr = module.run_command(cmd, path_prefix=os.path.dirname(vioshc_interpreter))
     if ret != 0:
-        OUTPUT.append('    VIOS Health check failed, vioshc returned: {0}'
-                      .format(stderr))
-        module.log('VIOS Health check failed, vioshc returned: {0} {1}'
-                   .format(ret, stderr))
+        OUTPUT.append(f'    VIOS Health check failed, vioshc returned: {stderr}')
+        module.log(f'VIOS Health check failed, vioshc returned: {ret} {stderr}')
         OUTPUT.append('    VIOS can NOT be updated')
-        module.log('vioses {0} can NOT be updated'.format(vios_uuids))
+        module.log(f'vioses {vios_uuids} can NOT be updated')
         ret = 1
     elif re.search(r'Pass rate of 100%', stdout, re.M):
         OUTPUT.append('    VIOS Health check passed')
-        module.log('vioses {0} can be updated'.format(vios_uuids))
+        module.log(f'vioses {vios_uuids} can be updated')
         ret = 0
     else:
         OUTPUT.append('    VIOS can NOT be updated')
-        module.log('vioses {0} can NOT be updated'.format(vios_uuids))
+        module.log(f'vioses {vios_uuids} can NOT be updated')
         ret = 1
 
     return ret
@@ -406,28 +400,24 @@ def vios_health_init(module, hmc_id, hmc_ip):
     return: True if ok,
             False otherwise
     """
-    global NIM_NODE
-    global results
-    global OUTPUT
 
-    module.debug('hmc_id: {0}, hmc_ip: {1}'.format(hmc_id, hmc_ip))
+    module.debug(f'hmc_id: {hmc_id}, hmc_ip: {hmc_ip}')
 
     # Call the vioshc.py script a first time to collect UUIDs
-    cmd = [vioshc_cmd, '-i', hmc_ip, '-l', 'a']
+    cmd = [vioshc_interpreter, vioshc_cmd, '-i', hmc_ip, '-l', 'a']
     if module._verbosity > 0:
         cmd.extend(['-' + 'v' * module._verbosity])
         if module._verbosity >= 3:
             cmd.extend(['-D'])
-
-    ret, stdout, stderr = module.run_command(cmd)
+    # path prefix is used here to ensure the dependent module paths are present.
+    # In this case, curl module.
+    ret, stdout, stderr = module.run_command(cmd, path_prefix=os.path.dirname(vioshc_interpreter))
     if ret != 0:
-        OUTPUT.append('    Failed to get the VIOS information, vioshc returned: {0}'
-                      .format(stderr))
-        module.log('Failed to get the VIOS information, vioshc returned: {0} {1}'
-                   .format(ret, stderr))
+        OUTPUT.append(f'    Failed to get the VIOS information, vioshc returned: {stderr}')
+        module.log(f'Failed to get the VIOS information, vioshc returned: {ret} {stderr}')
         results['stdout'] = stdout
         results['stderr'] = stderr
-        results['msg'] = 'Failed to get the VIOS information, vioshc returned: {0}'.format(ret)
+        results['msg'] = f'Failed to get the VIOS information, vioshc returned: {ret}'
         module.fail_json(**results)
 
     # Parse the output and store the UUIDs
@@ -438,7 +428,7 @@ def vios_health_init(module, hmc_id, hmc_ip):
     for line in stdout.split('\n'):
         line = line.rstrip()
         # TBC - remove?
-        module.debug('-- vioshc stdout line: {0}'.format(line))
+        module.debug(f'-- vioshc stdout line: {line}')
         if vios_section == 0:
             # skip the header
             match_key = re.match(r"^-+\s+-+$", line)
@@ -454,8 +444,7 @@ def vios_health_init(module, hmc_id, hmc_ip):
                 cec_uuid = match_key.group(1)
                 cec_serial = match_key.group(2)
 
-                module.debug('New managed system section:{0},{1}'
-                             .format(cec_uuid, cec_serial))
+                module.debug(f'New managed system section:{cec_uuid},{cec_serial}')
                 continue
 
             # New vios section
@@ -472,8 +461,7 @@ def vios_health_init(module, hmc_id, hmc_ip):
         if match_key:
             vios_uuid = match_key.group(1)
             vios_part_id = match_key.group(2)
-            module.debug('new vios partitionsection:{0},{1}'
-                         .format(vios_uuid, vios_part_id))
+            module.debug(f'new vios partitionsection:{vios_uuid},{vios_part_id}')
 
             # retrieve the vios with the vios_part_id and the cec_serial value
             # and store the UUIDs in the dictionaries
@@ -496,13 +484,12 @@ def vios_health_init(module, hmc_id, hmc_ip):
             vios_section = 0
             continue
 
-        OUTPUT.append('    Bad command output for the hmc: {0}'.format(hmc_id))
-        module.log('vioshc command, bad output line: {0}'.format(line))
-        results['msg'] = 'Health init check failed. Bad vioshc.py command output for the {0} hmc - output: {1}'\
-                         .format(hmc_id, line)
+        OUTPUT.append(f'    Bad command output for the hmc: {hmc_id}')
+        module.log(f'vioshc command, bad output line: {line}')
+        results['msg'] = f'Health init check failed. Bad vioshc.py command output for the {hmc_id} hmc - output: {line}'
         module.fail_json(**results)
 
-    module.debug('vioshc output: {0}'.format(line))
+    module.debug(f'vioshc output: {line}')
     return ret
 
 
@@ -517,33 +504,30 @@ def health_check(module, targets):
 
     return: a dictionary with the state of each VIOS tuple
     """
-    global NIM_NODE
 
-    module.debug('targets: {0}'.format(targets))
+    module.debug(f'targets: {targets}')
 
     health_tab = {}
     vios_key = []
     for target_tuple in targets:
-        OUTPUT.append('Checking: {0}'.format(target_tuple))
-        module.debug('target_tuple: {0}'.format(target_tuple))
+        OUTPUT.append(f'Checking: {target_tuple}')
+        module.debug(f'target_tuple: {target_tuple}')
 
         tup_len = len(target_tuple)
         vios1 = target_tuple[0]
         if tup_len == 2:
             vios2 = target_tuple[1]
-            vios_key = "{0}-{1}".format(vios1, vios2)
+            vios_key = f"{vios1}-{vios2}"
         else:
             vios_key = vios1
 
-        module.debug('vios1: {0}'.format(vios1))
+        module.debug(f'vios1: {vios1}')
         # cec_serial = NIM_NODE['nim_vios'][vios1]['mgmt_cec_serial']
         hmc_id = NIM_NODE['nim_vios'][vios1]['mgmt_hmc_id']
 
         if hmc_id not in NIM_NODE['nim_hmc']:
-            OUTPUT.append('    VIOS {0} refers to an inexistant hmc {1}'
-                          .format(vios1, hmc_id))
-            module.log("[WARNING] VIOS {0} refers to an inexistant hmc {1}"
-                       .format(vios1, hmc_id))
+            OUTPUT.append(f'    VIOS {vios1} refers to an inexistant hmc {hmc_id}')
+            module.log(f"[WARNING] VIOS {vios1} refers to an inexistant hmc {hmc_id}")
             health_tab[vios_key] = 'FAILURE-HC'
             continue
 
@@ -558,10 +542,8 @@ def health_check(module, targets):
 
             ret = vios_health_init(module, hmc_id, hmc_ip)
             if ret != 0:
-                OUTPUT.append('    Unable to get UUIDs of {0} and {1}, ret: {2}'
-                              .format(vios1, vios2, ret))
-                module.log("[WARNING] Unable to get UUIDs of {0} and {1}, ret: {2}"
-                           .format(vios1, vios2, ret))
+                OUTPUT.append(f'    Unable to get UUIDs of {vios1} and {vios2}, ret: {ret}')
+                module.log(f"[WARNING] Unable to get UUIDs of {vios1} and {vios2}, ret: {ret}")
                 health_tab[vios_key] = 'FAILURE-HC'
                 continue
 
@@ -585,22 +567,69 @@ def health_check(module, targets):
 
             if ret == 0:
                 OUTPUT.append('    Health check succeeded')
-                module.log("Health check succeeded for {0}".format(vios_key))
+                module.log(f"Health check succeeded for {vios_key}")
                 health_tab[vios_key] = 'SUCCESS-HC'
             else:
                 OUTPUT.append('    Health check failed')
-                module.log("Health check failed for {0}".format(vios_key))
+                module.log(f"Health check failed for {vios_key}")
                 health_tab[vios_key] = 'FAILURE-HC'
 
-    module.debug('health_tab: {0}'. format(health_tab))
+    module.debug(f'health_tab: {health_tab}')
     return health_tab
+
+
+def get_vioshc_interpreter(module):
+    """
+    Provide the right python interpreter to be used for vioshc command.
+    return: Right python interpreter if ok,
+            Null string otherwise
+    """
+    """
+    Check whether the python interpreter is in the list.
+    if that path exists on the system , then continue with that
+    else proceed to the next interpreter in the list.
+    """
+    is_interpreter_found = False
+    is_pycurl_found = False
+    python_interpreter_list = ['/usr/bin/python', '/opt/freeware/bin/python3', '/usr/bin/python3']
+
+    for interpreter in python_interpreter_list:
+        # Reinitialize these values for every loop
+        is_interpreter_found = False
+        is_pycurl_found = False
+        # check if that path exists. Add check for pycurl module.
+        if os.path.isfile(interpreter):
+            is_interpreter_found = True
+            cmd = interpreter + '  -c "import pycurl"'
+            ret, stdout, stderr = module.run_command(cmd)
+            if ret == 0:
+                return interpreter
+            else:
+                is_pycurl_found = False
+
+    """
+    If we have exhausted the list, that means no interpreter or no pycurl module
+    in the list was found. So give a error message.The interpreter will be found
+    always because without the ansible module will not run anyway.
+    """
+    if is_interpreter_found is True:
+        if is_pycurl_found is False:
+            msg = 'Unable to find the right python interpreter with the dependent module pycurl.'
+            OUTPUT.append('    Warning: Dependent module pycurl is not found  ')
+            results['stdout'] = stdout
+            results['stderr'] = stderr
+    else:
+        msg = 'Unable to find the python interpreter for vioshc command. '
+        OUTPUT.append('    Warning: No python interpreter found. ')
+
+    results['msg'] = msg
+    return None
 
 
 def main():
     global results
-    global OUTPUT
-    global NIM_NODE
     global vioshc_cmd
+    global vioshc_interpreter
 
     module = AnsibleModule(
         argument_spec=dict(
@@ -619,7 +648,7 @@ def main():
     # Get module params
     targets = module.params['targets']
 
-    OUTPUT.append('VIOS Health Check operation for {0}'.format(targets))
+    OUTPUT.append(f'VIOS Health Check operation for {targets}')
 
     target_list = []
     targets_health_status = {}
@@ -630,23 +659,30 @@ def main():
     ret = check_vios_targets(module, targets)
     if (ret is None) or (not ret):
         OUTPUT.append('    Warning: Empty target list')
-        module.log('[WARNING] Empty target list: "{0}"'.format(targets))
+        module.log(f'[WARNING] Empty target list: "{targets}"')
     else:
         target_list = ret
-        OUTPUT.append('    Targets list: {0}'.format(target_list))
-        module.debug('Targets list: {0}'.format(target_list))
+        OUTPUT.append(f'    Targets list: {target_list}')
+        module.debug(f'Targets list: {target_list}')
+        """
+        Get the interpreter for vioshc command.  If unable to find a
+        proper interpreter, then fail.
+        """
+        vioshc_interpreter = get_vioshc_interpreter(module)
+        if vioshc_interpreter is None:
+            module.fail_json(**results)
 
-        # Check vioshc script is present, fail_json if not
+        # Get the vioshc command path
         vioshc_cmd = module.get_bin_path('vioshc.py', required=True)
-        module.debug('Using vioshc.py script at {0}'.format(vioshc_cmd))
+        module.debug(f'Using vioshc.py script at {vioshc_interpreter}:{vioshc_cmd}')
 
         targets_health_status = health_check(module, target_list)
 
         OUTPUT.append('VIOS Health Check status:')
         module.log('VIOS Health Check status:')
-        for vios_key in targets_health_status.keys():
-            OUTPUT.append("    {0} : {1}".format(vios_key, targets_health_status[vios_key]))
-            module.log('    {0} : {1}'.format(vios_key, targets_health_status[vios_key]))
+        for vios_key, vios_health_status in targets_health_status.items():
+            OUTPUT.append(f"    {vios_key} : {vios_health_status}")
+            module.log(f'    {vios_key} : {vios_health_status}')
 
     results['targets'] = target_list
     results['nim_node'] = NIM_NODE

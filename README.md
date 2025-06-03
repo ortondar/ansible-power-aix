@@ -14,6 +14,11 @@ Power platforms as part of an enterprise automation strategy through the Ansible
 The **IBM Power Systems AIX collection** is included as an upstream collection under the
 **Ansible Content for IBM Power Systems** umbrella of community content.
 
+## Join the Power Research Program
+
+Become an IBM Power Design Partner. Engage with our Power Research team across various research studies to shape the future of Anisble on Power:
+https://ibm.biz/BdyRyk
+
 <!-- A more detailed Usage or detailed explanation of the repository here -->
 ## Usage
 
@@ -33,10 +38,16 @@ This repository contains some example best practices for open source repositorie
 <!-- ## Notes -->
 ## Requirements
 
+- AIX 7.3 will require additional software only for the flrtvc, nim_flrtvc and nim_vios_hc AIX Ansible Collection's modules.
+    Additional open-source software is installed by configuring [DNF] first. [YUM] only supports Python2.
+  - Modules flrtvc and nim_flrtvc requires wget. See demo playbooks examples.
+  - Module nim_vios_hc software requirements will be automatically installed using power_aix_vioshc role. See demo playbook examples.
+
 ### Platforms
 
 - AIX 7.1
 - AIX 7.2
+- AIX 7.3
 
 ### Ansible
 
@@ -46,9 +57,11 @@ This repository contains some example best practices for open source repositorie
 
 ### Python
 
-- Requires Python 2.7 or newer
-- To install (or upgrade) Python on AIX, you must first configure [YUM].  As part of YUM installation, Python2 will be installed by default
-- After setting up and installing YUM, you may update all the packages to the latest level using the yum update command
+- Requires Python 3.8 or newer
+- To install (or upgrade) Python on AIX 7.1 and 7.2, you must first configure [YUM].  As part of YUM installation, Python2 will be installed by default.
+- After setting up and installing YUM, you may update all the packages to the latest level using the yum update command.
+- AIX 7.3 will come with Python3 pre-installed. Ansible will work with AIX 7.3 with no need for additional software.
+
 
 ## Resources
 
@@ -75,7 +88,7 @@ example:
 If you would like to see the detailed LICENSE click [here](LICENSE).
 
 ```text
-Copyright:: 2020- IBM, Inc
+Copyright:: 2021- IBM, Inc
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -100,6 +113,12 @@ Authors:
 - Nitish Mishra <nitismis@in.ibm.com>
 - Patrice Jacquin <pjacquin@us.ibm.com>
 - Pascal Oliva <poliva@us.ibm.com>
+- Julia Rebello <julia.rebello@ibm.com>
+- Joseph de Joya <joseph.de.joya@ibm.com>
+- Rae Yang <raeyang@us.ibm.com>
+- Gomathi Mohan <gommohan@in.ibm.com>
+- Pedro V. Torres <pvtorres@us.ibm.com>
+- Shreyansh Chamola <shreyansh.chamola@ibm.com>
 
 [coc]: https://help.github.com/en/github/building-a-strong-community/adding-a-code-of-conduct-to-your-project
 [issues]: https://github.com/IBM/ansible-power-aix/issues/new

@@ -5,8 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
-__metaclass__ = type
-
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
                     'supported_by': 'community'}
@@ -19,10 +17,10 @@ module: mpio
 short_description: Returns information about MultiPath I/O capable devices.
 description:
 - Returns information about MultiPath I/O capable devices.
-version_added: '2.9'
+version_added: '1.1.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 options:
   device:
     description:
@@ -39,15 +37,39 @@ options:
 EXAMPLES = r'''
 - name: Gather paths to all MultiPath I/O capable devices
   mpio:
+  register: mpio_info
 - name: Print the paths
   debug:
-    var: ansible_facts.mpio.paths
+    var: mpio_info.mpio_facts.paths
 '''
 
 RETURN = r'''
-ansible_facts:
+msg:
+    description: The execution message.
+    returned: always
+    type: str
+    sample: "Successfully retrieved mpio facts. Check mpio_facts for more details."
+cmd:
+    description: The command executed.
+    returned: always
+    type: str
+    sample: /usr/bin/manage_disk_drivers -l
+rc:
+    description: The command return code.
+    returned: always
+    type: int
+stdout:
+    description: The standard output of the command.
+    returned: always
+    type: str
+stderr:
+    description: The standard error of the command.
+    returned: In case of error
+    type: str
+    sample: 'lspath: 0514-546 Invalid parameter - ansibleNegativeTest.'
+mpio_facts:
   description:
-  - Facts to add to ansible_facts about paths to MultiPath I/O capable devices.
+  - Facts about paths to MultiPath I/O capable devices.
   returned: always
   type: complex
   contains:
@@ -111,7 +133,12 @@ ansible_facts:
             }
 '''
 
+
 from ansible.module_utils.basic import AnsibleModule
+__metaclass__ = type
+
+
+results = None
 
 
 def gather_facts(module):
@@ -124,7 +151,19 @@ def gather_facts(module):
         cmd += ['-l', module.params['device']]
     if module.params['parent']:
         cmd += ['-p', module.params['parent']]
-    ret, stdout, stderr = module.run_command(cmd)
+
+    rc, stdout, stderr = module.run_command(cmd)
+    results['stdout'] = stdout
+    results['cmd'] = ' '.join(cmd)
+
+    if rc:
+        results['stderr'] = stderr
+        results['rc'] = 1
+        results['msg'] = f"The following command failed: {' '.join(cmd)}."
+        if "0514-546" in stderr:
+            results['msg'] += " Invalid device provided."
+        module.fail_json(**results)
+
     for line in stdout.splitlines():
         fields = line.split(':')
         if len(fields) != 6:
@@ -147,7 +186,17 @@ def gather_facts(module):
         return dict(paths=paths, drivers=drivers)
 
     cmd = [manage_disk_drivers_path, '-l']
-    ret, stdout, stderr = module.run_command(cmd)
+
+    rc, stdout, stderr = module.run_command(cmd)
+    results['stdout'] = stdout
+    results['cmd'] = ' '.join(cmd)
+
+    if rc:
+        results['stderr'] = stderr
+        results['rc'] = 1
+        results['msg'] = f"The following command failed: {' '.join(cmd)}"
+        module.fail_json(**results)
+
     for line in stdout.splitlines():
         fields = line.split()
         if len(fields) != 3:
@@ -163,6 +212,7 @@ def gather_facts(module):
 
 
 def main():
+    global results
     module = AnsibleModule(
         argument_spec=dict(
             device=dict(type='str'),
@@ -170,9 +220,20 @@ def main():
         )
     )
 
-    facts = gather_facts(module)
+    results = dict(
+        changed=False,
+        rc=0,
+        msg='',
+        cmd='',
+        stdout='',
+        stderr='',
+        mpio_facts={},
+    )
 
-    module.exit_json(ansible_facts=dict(mpio=facts))
+    results['mpio_facts'] = gather_facts(module)
+    results['msg'] = "Successfully retrieved mpio facts. Check mpio_facts for more details."
+    results['ansible_facts'] = results['mpio_facts']
+    module.exit_json(**results)
 
 
 if __name__ == '__main__':

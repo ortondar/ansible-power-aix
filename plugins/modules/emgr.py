@@ -5,11 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import absolute_import, division, print_function
-__metaclass__ = type
-
-ANSIBLE_METADATA = {'metadata_version': '1.1',
-                    'status': ['preview'],
-                    'supported_by': 'community'}
 
 DOCUMENTATION = r'''
 ---
@@ -22,10 +17,10 @@ description:
   the database containing interim fix information.
 - It can perform the following operations install, commit, check, mount, unmount, remove, list
   interim fix (ifix) and view package locks.
-version_added: '2.9'
+version_added: '0.4.0'
 requirements:
 - AIX >= 7.1 TL3
-- Python >= 2.7
+- Python >= 3.6
 - 'Privileged user with authorization: B(aix.system.install)'
 options:
   action:
@@ -88,7 +83,7 @@ options:
     - The file must have one item per line, blank lines or starting with # character are ignored.
     - Can be used if I(action) has one of following values C(install), C(remove), C(check),
       C(mount), C(unmount), C(display_ifix).
-    - Mutually exclusive with I(ifix_label), I(ifix_number), I(ifix_vuid), I(ifix_package).
+    - Mutually exclusive with I(ifix_label), I(ifix_number), I(ifix_vuid), I(ifix_package), I(ifix_packages).
     type: path
   package:
     description:
@@ -170,6 +165,16 @@ options:
     - Can be used if I(action) has one of following values C(list), C(check), C(view_package).
     type: int
     choices: [ 1, 2, 3 ]
+  ifix_packages:
+    description:
+    - Specifies a list of interim fix package locations or labels.
+    - Each entry must be a valid path to an interim fix package file or a label.
+    - Can be used if I(action) has one of the following values C(install), C(remove), C(check), C(mount), C(unmount), C(display_ifix).
+    - Mutually exclusive with I(ifix_label), I(ifix_number), I(ifix_vuid), I(ifix_package), I(list_file).
+    - This replaces I(list_file) by directly accepting a list instead of requiring a file.
+    - It will create a temporary file containing the list of paths and update the I(list_file) with newly created temporary file for futher execution.
+    type: list
+    elements: str
 notes:
   - System administrators or users with the aix.system.install authorization can run the emgr
     command on a multi-level secure (MLS) system.
@@ -188,8 +193,8 @@ EXAMPLES = r'''
     action: install
     ifix_package: /usr/sys/inst.images/IJ22714s1a.200212.AIX72TL04SP00-01.epkg.Z
     working_dir: /usr/sys/inst.images
-    from_epkg: yes
-    extend_fs: yes
+    from_epkg: true
+    extend_fs: true
 
 - name: List a specific ifix data in details
   emgr:
@@ -206,8 +211,8 @@ EXAMPLES = r'''
   emgr:
     action: commit
     ifix_label: IJ22714s1a
-    preview: True
-    quiet: True
+    preview: true
+    quiet: true
 
 - name: Remove an installed ifix based on its VUID
   emgr:
@@ -226,6 +231,11 @@ msg:
     returned: always
     type: str
     sample: 'Missing parameter: force remove requires: ifix_label'
+reboot_required:
+    description: Indicates if ifix requires reboot.
+    returned: always
+    type: bool
+    sample: True
 stdout:
     description: The standard output.
     returned: always
@@ -260,12 +270,14 @@ stderr:
     type: str
     sample: 'There is no efix data on this system.'
 '''
-
 import os
 import re
-
 from ansible.module_utils.basic import AnsibleModule
+__metaclass__ = type
 
+ANSIBLE_METADATA = {'metadata_version': '1.1',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
 module = None
 results = None
 
@@ -282,22 +294,147 @@ def param_one_of(one_of_list, required=True, exclusive=True):
         Ansible might have this embedded in some version: require_if 4th parameter.
         Exits with fail_json in case of error
     """
-    global module
-    global results
 
     count = 0
+    action = module.params['action']
     for param in one_of_list:
         if module.params[param] is not None and module.params[param]:
             count += 1
             break
     if count == 0 and required:
-        results['msg'] = 'Missing parameter: action is {0} but one of the following is missing: '.format(module.params['action'])
+        results['msg'] = f'Missing parameter: action is {action} but\
+                           one of the following is missing: '
         results['msg'] += ','.join(one_of_list)
+        if module.params['ifix_packages']:
+            delete_temp_file(module.params['list_file'])
         module.fail_json(**results)
     if count > 1 and exclusive:
-        results['msg'] = 'Invalid parameter: action is {0} supports only one of the following: '.format(module.params['action'])
+        results['msg'] = f'Invalid parameter: action is {action} supports\
+                           only one of the following: '
         results['msg'] += ','.join(one_of_list)
+        if module.params['ifix_packages']:
+            delete_temp_file(module.params['list_file'])
         module.fail_json(**results)
+
+
+def parse_ifix_details(output):
+    """
+    Parses the output of "emgr -l" command to return the ifixes as a list instead of str.
+
+    argument:
+      stdout (str) standard output of the command.
+
+    return:
+      List of dictionaries containing information about the iFixes.
+    """
+    ifix_name = []
+
+    info_list = ["ID", "STATE", "LABEL", "INSTALL TIME", "UPDATED BY", "ABSTRACT"]
+    position_dict = {}
+
+    def get_value(line, field):
+        field_index = info_list.index(field)
+        next_field_index = field_index + 1
+        start_position = position_dict[field]
+
+        # End-of-line
+        if next_field_index >= len(info_list):
+            end_position = None
+
+        # All fields before the last one
+        else:
+            end_position = position_dict[info_list[next_field_index]]
+
+        return line[start_position:end_position].strip()
+
+    for line in output.split('\n'):
+        line = line.strip()
+
+        # Looking where each field position starts
+        if line.upper().startswith(info_list[0].upper()):
+            for field in info_list:
+                if field not in position_dict:
+                    position_dict[field] = line.find(field)
+
+        # Iterating over each line looking for actual data
+        elif len(position_dict) > 0:
+            try:
+                ifix_id = get_value(line, info_list[0])
+                int(ifix_id)
+            except ValueError:
+                continue
+
+            # Collect row values into dictionary
+            ifix_data = {info_list[0]: ifix_id}
+            for field in info_list[1:]:
+                ifix_data[field] = get_value(line, field)
+
+            ifix_name.append(ifix_data)
+
+    return ifix_name
+
+
+def is_ifix_installed(module, ifix_package):
+
+    # Utility function to check if the ifix is installed in the system.
+    ifix_label = ifix_package.split('/')[-1].split('.')[0]
+    cmd = 'emgr -c -L' + ifix_label
+
+    rc = module.run_command(cmd)[0]
+
+    if rc == 0:
+        return True
+    else:
+        return False
+
+
+def create_emgr_temp_file(ifix_packages):
+    """
+    Function to create a temporary file named 'emgr_tmp_file' in the /tmp directory on AIX
+    and write the list of 'ifix_packages' into it.
+    argument:
+    ifix_packages -List of iFix package paths to be written into the file.
+    return:
+    The full path of the created temporary file.
+    """
+    temp_dir = "/tmp"  # Standard temp directory on AIX
+    temp_file_path = os.path.join(temp_dir, "emgr_tmp_file")
+
+    with open(temp_file_path, 'w') as temp_file:
+        temp_file.write('\n'.join(ifix_packages) + '\n')
+
+    return temp_file_path
+
+
+def delete_temp_file(list_file):
+    """
+    Function to delete the temporary file if 'ifix_packages' is not empty or None.
+    argument:
+    list_file -Path of the temporary file to be deleted
+    """
+    # Check if file exists before attempting to delete
+    if list_file is not None and os.path.exists(list_file):
+        os.remove(list_file)
+
+
+def compare_counts(list1, list2, string):
+    """
+    Function to compare the total count of elements in two lists with
+    the occurrences of the pattern '0645-065' in a given string.
+    argument:
+    list1 -First list of elements
+    list2 -Second list of elements
+    string -The input string in which occurrences of '0645-065' are counted
+    return:
+    True if the total count of list elements matches the pattern count, else False
+    """
+    total_list_count = len(list1) + len(list2)
+    # Count occurrences of the pattern "0645-065" in the string
+    pattern_count = len(re.findall(r'0645-065', string))
+    if total_list_count == pattern_count:
+        return True
+    else:
+        return False
 
 
 def main():
@@ -326,6 +463,7 @@ def main():
             quiet=dict(type='bool', default=False),
             bosboot=dict(type='str', choices=['skip', 'load_debugger', 'invoke_debugger']),
             verbose=dict(type='int', choices=[1, 2, 3]),
+            ifix_packages=dict(type='list', elements='str'),
         ),
         required_if=[],
         mutually_exclusive=[['ifix_package', 'ifix_label', 'ifix_number', 'ifix_vuid', 'list_file']],
@@ -336,14 +474,32 @@ def main():
         msg='',
         stdout='',
         stderr='',
+        ifix_details=[],
+        reboot_required=False,
     )
+
+    ifix_packages = module.params['ifix_packages']
+    list_file = module.params['list_file']
+    if list_file is None and ifix_packages is not None:
+        module.params['list_file'] = create_emgr_temp_file(ifix_packages)
 
     bosboot_flags = {'skip': '-b', 'load_debugger': '-k', 'invoke_debugger': '-I'}
 
     action = module.params['action']
+    verbose = module.params['verbose']
 
     cmd = ['emgr']
     if action == 'install':
+
+        # check if ifix is already installed in the system
+        if module.params['ifix_package']:
+            if is_ifix_installed(module, module.params['ifix_package']):
+                results['msg'] = 'This ifix is already installed. Nothing to do.'
+
+                if module.params['ifix_packages']:
+                    delete_temp_file(module.params['list_file'])
+                module.exit_json(**results)
+
         # Usage: emgr -e <ifix pkg> | -f <lfile> [-w <dir>] [-a <path>] [-bkpIqmoX]
         # Usage: emgr -i <ifix pkg> | -f <lfile> [-w <dir>] [-a <path>] [-CkpIqX]
         param_one_of(['ifix_package', 'list_file'])
@@ -356,7 +512,11 @@ def main():
                 cmd += ['-e', module.params['ifix_package']]
             else:
                 if module.params['bosboot'] and module.params['bosboot'] == 'skip':
-                    results['msg'] = 'Invalid parameter: action is install, does not support bosboot set to {0}'.format(module.params['bosboot'])
+                    results['msg'] = 'Invalid parameter: action is install, does not support bosboot set to skip'
+
+                    if module.params['ifix_packages']:
+                        delete_temp_file(module.params['list_file'])
+
                     module.fail_json(**results)
                 if module.params['ifix_package']:   # this test is optional thanks to param_one_of check.
                     cmd += ['-i', module.params['ifix_package']]
@@ -384,7 +544,10 @@ def main():
         # Usage: emgr -C -i <ifix pkg> | -f <lfile> [-w <dir>] [-a <path>] [-kpIqX]
         param_one_of(['ifix_label', 'ifix_package', 'list_file'])
         if module.params['bosboot'] == 'skip':
-            results['msg'] = 'Invalid parameter: action is commit, does not support bosboot set to {0}'.format(module.params['bosboot'])
+            results['msg'] = 'Invalid parameter: action is commit, does not support bosboot set to skip'
+
+            if module.params['ifix_packages']:
+                delete_temp_file(module.params['list_file'])
             module.fail_json(**results)
 
         cmd += ['-C']
@@ -432,13 +595,24 @@ def main():
             cmd += ['-a', module.params['alternate_dir']]
         if module.params['extend_fs']:
             cmd += ['-X']
-        if action == 'check' and module.params['verbose'] is not None:
-            cmd += ['-v', '{0}'.format(module.params['verbose'])]
+        if action == 'check' and verbose is not None:
+            cmd += ['-v', f'{verbose}']
 
     elif action == 'remove' and module.params['force']:
         # Usage: emgr -R <ifix label> [-w <dir>] [-a <path>] [-X]
+        if module.params['ifix_package']:
+            if not is_ifix_installed(module, module.params['ifix_package']):
+                results['msg'] = 'This ifix is NOT installed in the system. Nothing to do.'
+
+                if module.params['ifix_packages']:
+                    delete_temp_file(module.params['list_file'])
+                module.exit_json(**results)
         if not module.params['ifix_label']:
             results['msg'] = 'Missing parameter: force remove requires: ifix_label'
+
+            if module.params['ifix_packages']:
+                delete_temp_file(module.params['list_file'])
+
             module.fail_json(**results)
         cmd += ['-R', module.params['ifix_label']]
         if module.params['working_dir']:
@@ -450,6 +624,13 @@ def main():
 
     elif action == 'remove':
         # Usage: emgr -r -L <label> | -n <ifix num> | -u <VUID> | -f <lfile> [-w <dir>] [-a <path>] [-bkpIqX]
+        if module.params['ifix_package']:
+            if not is_ifix_installed(module, module.params['ifix_package']):
+                results['msg'] = 'This ifix is NOT installed in the system. Nothing to do.'
+
+                if module.params['ifix_packages']:
+                    delete_temp_file(module.params['list_file'])
+                module.exit_json(**results)
         param_one_of(['ifix_label', 'ifix_number', 'ifix_vuid', 'list_file'])
         cmd += ['-r']
         if module.params['ifix_label']:
@@ -493,8 +674,8 @@ def main():
             cmd += ['-f', module.params['list_file']]
         if module.params['working_dir']:
             cmd += ['-w', module.params['working_dir']]
-        if module.params['verbose'] is not None:
-            cmd += ['-v', '{0}'.format(module.params['verbose'])]
+        if verbose is not None:
+            cmd += ['-v', f'{verbose}']
         if module.params['extend_fs']:
             cmd += ['-X']
 
@@ -508,8 +689,8 @@ def main():
             cmd += ['-n', module.params['ifix_number']]
         elif module.params['ifix_vuid']:
             cmd += ['-u', module.params['ifix_vuid']]
-        if module.params['verbose'] is not None:
-            cmd += ['-v', '{0}'.format(module.params['verbose'])]
+        if verbose is not None:
+            cmd += ['-v', f'{verbose}']
         if module.params['extend_fs']:
             cmd += ['-X']
         if module.params['alternate_dir']:
@@ -526,7 +707,53 @@ def main():
 
         results['stdout'] = stdout
         results['stderr'] = stderr
+
+        if "system reboot is required" in stderr:
+            results['reboot_required'] = True
+
+        pattern = "There is no efix data on this system"
+        found = re.search(pattern, stderr)
+
+        if rc == 0 and found:
+
+            if module.params['ifix_packages']:
+                delete_temp_file(module.params['list_file'])
+            module.exit_json(**results)
+
         if rc != 0:
+            line_pattern = r"(\s*)E(PKG|FIX) NUMBER(\s*)LABEL(\s*)OPERATION(\s*)RESULT(\s*)"
+            res_line = re.search(line_pattern, stdout)
+            success_list = []
+            fail_list = []
+
+            if module.params['list_file'] and res_line:
+                summary_line = res_line.group(0)
+                stdout_lines = (stdout.split(summary_line)[1]).splitlines()[1:-1]
+                for line in stdout_lines:
+                    line = line.split()
+                    if len(line):
+                        if line[-1] == "SUCCESS":
+                            success_list.append(line[1])
+                        if line[-1] == "FAILURE":
+                            fail_list.append(line[1])
+
+                if len(success_list):
+                    results['msg'] = f"Action - {module.params['action']} performed successfuly on {', '.join(success_list)}."
+                    results['msg'] += f" Failed for the following: {', '.join(fail_list)}."
+                    results['changed'] = True
+
+                    if module.params['ifix_packages']:
+                        delete_temp_file(module.params['list_file'])
+                    module.exit_json(**results)
+
+            check = compare_counts(success_list, fail_list, stderr)
+            if check:
+                results['changed'] = False
+                results['msg'] = f'Ifix {fail_list} already installed.'
+                if module.params['ifix_packages']:
+                    delete_temp_file(module.params['list_file'])
+                module.exit_json(**results)
+
             # Ifix was already installed(0645-065).
             # Ifix with label to remove is not there (0645-066).
             # Ifix with VUUID to remove is not there (0645-082).
@@ -536,16 +763,28 @@ def main():
             results['changed'] = False
 
             if not found:
-                results['msg'] = 'Command \'{0}\' failed with return code {1}.'.format(' '.join(cmd), rc)
-                module.fail_json(**results)
+                results['msg'] = f'Command {cmd} failed with return code {rc}.'
 
-        results['msg'] = 'Command \'{0}\' successful.'.format(' '.join(cmd))
+            if module.params['ifix_packages']:
+                delete_temp_file(module.params['list_file'])
+            module.fail_json(**results)
+
+        results['msg'] = f'Command {cmd} successful.'
         if action in ['install', 'commit', 'mount', 'unmount', 'remove'] and not module.params['preview'] and not module.check_mode and (rc == 0):
             results['changed'] = True
+        elif action == 'list' and not module.params['preview'] and not module.check_mode and (rc == 0):
+            results['ifix_details'] = parse_ifix_details(stdout)
     else:
-        results['msg'] = 'Command \'{0}\' has no preview mode, execution skipped.'.format(' '.join(cmd))
+        results['msg'] = f'Command {cmd} has no preview mode, execution skipped.'
         results['stdout'] = 'No stdout as execution has been skipped.'
 
+    for i in results['ifix_details']:
+        if "Q" in i['STATE']:
+            results['reboot_required'] = True
+            break
+
+    if module.params['ifix_packages']:
+        delete_temp_file(module.params['list_file'])
     module.exit_json(**results)
 
 

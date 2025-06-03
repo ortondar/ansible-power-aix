@@ -78,7 +78,6 @@ class ActionModule(ActionBase):
                 reboot_timeout = 300
 
             self.do_until_success_or_timeout(
-                action_desc="post-reboot test command",
                 reboot_timeout=reboot_timeout,
                 test_command=test_command,
                 action_kwargs=action_kwargs)
@@ -95,7 +94,7 @@ class ActionModule(ActionBase):
 
         return result
 
-    def do_until_success_or_timeout(self, action_desc, reboot_timeout, test_command, action_kwargs=None):
+    def do_until_success_or_timeout(self, reboot_timeout, test_command, action_kwargs=None):
         max_end_time = datetime.utcnow() + timedelta(seconds=reboot_timeout)
         if action_kwargs is None:
             action_kwargs = {}
@@ -141,13 +140,16 @@ class ActionModule(ActionBase):
             self._display.vvv("Reboot command has failed. System still running")
             result['failed'] = True
             result['rebooted'] = False
-            result['msg'] = "Reboot command failed. Error was {stdout}, {stderr}".format(stdout=reboot_result['stdout'], stderr=reboot_result['stderr'])
+            reboot_res_stdout = reboot_result['stdout']
+            reboot_res_stderr = reboot_result['stderr']
+            result['msg'] = f"Reboot command failed. Error was {reboot_res_stdout}, {reboot_res_stderr}"
             elapsed = datetime.utcnow() - start
             result['elapsed'] = str(elapsed.seconds) + ' sec'
             return result
 
         if self.post_reboot_delay != 0:
-            self._display.vvv("waiting for post reboot delay of {delay} seconds".format(delay=self.post_reboot_delay))
+            reboot_delay = self.post_reboot_delay
+            self._display.vvv(f"waiting for post reboot delay of {reboot_delay} seconds")
             time.sleep(self.post_reboot_delay)
 
         result = self.validate_reboot(test_command, reboot_timeout, action_kwargs=None)

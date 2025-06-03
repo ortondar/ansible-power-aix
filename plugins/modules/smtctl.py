@@ -5,7 +5,6 @@
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
 from __future__ import (absolute_import, division, print_function)
-__metaclass__ = type
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
@@ -23,11 +22,11 @@ description:
 - The simultaneous multithreading mode allows processors to have thread level parallelism at the instruction level.
 - This mode can be enabled or disabled for all processors either immediately or on subsequent boots of the system.
 - This command controls the simultaneous multithreading options.
-version_added: '2.9'
+version_added: '1.3.0'
 requirements:
 - AIX  7.2
 - IBM Power9_Power8
-- Python >= 2.7
+- Python >= 3.6
 options:
   smt_value:
     description:
@@ -67,13 +66,13 @@ EXAMPLES = r'''
 - name: Enable the SMT value to 8 and value needs to be persist across subsequent reboot
   ibm.power_aix.smtctl:
     smt_value: 8
-    bos_boot: yes
+    bos_boot: true
 
 - name: Enable the SMT value to 8 to next boot if bos_boot set to yes
   ibm.power_aix.smtctl:
     smt_value: 8
     chtype: boot
-    bos_boot: yes
+    bos_boot: true
 
 - name: Limit the SMT value to 4
   ibm.power_aix.smtctl:
@@ -98,7 +97,9 @@ msg:
 
 '''
 
+
 from ansible.module_utils.basic import AnsibleModule
+__metaclass__ = type
 
 
 def get_smt_state(module):
@@ -106,7 +107,7 @@ def get_smt_state(module):
     cmd = "smtctl"
     rc, stdout, stderr = module.run_command(cmd)
     if rc != 0:
-        msg = "Command '%s' failed." % cmd
+        msg = f"Command {cmd} failed."
         module.fail_json(msg=msg, rc=rc, stdout=stdout, stderr=stderr)
 
     if stdout:
@@ -125,7 +126,12 @@ def get_smt_state(module):
 
 
 def smt_set(module):
-    """ Set the smt value to enable or disable or set the threads value as per the default smt_value"""
+    """
+
+    Set the smt value to enable or disable or set the
+    threads value as per the default smt_value
+
+    """
 
     smt_value = module.params["smt_value"]
     smt_extra = module.params["smt_extra"]
@@ -138,16 +144,16 @@ def smt_set(module):
     opts = ""
 
     if smt_value and chtype and not smt_limit:
-        opts += "-t %s -w %s" % (smt_value, chtype)
+        opts += f"-t {smt_value} -w {chtype}"
 
     elif smt_value and smt_limit:
-        opts += "-m %s -t %s" % (smt_limit, smt_value)
+        opts += f"-m {smt_limit} -t {smt_value}"
 
     elif smt_value:
-        opts += "-t %s" % (smt_value)
+        opts += f"-t {smt_value}"
 
     elif smt_extra:
-        opts += "-m %s" % (smt_extra)
+        opts += f"-m {smt_extra}"
 
     elif smt_state == "enabled":
         opts += "-m on"
@@ -158,15 +164,15 @@ def smt_set(module):
     else:
         opts = ""
 
-    cmd = "smtctl %s" % opts
+    cmd = f"smtctl {opts}"
     rc, stdout, stderr = module.run_command(cmd)
 
     if rc != 0:
-        msg = "Command Execution Failure cmd: %s" % cmd
+        msg = f"Command Execution Failure cmd: {cmd}"
         module.fail_json(msg=msg, rc=rc, stdout=stdout, stderr=stderr)
 
     else:
-        msg = "Command Executed Successfully cmd: %s" % cmd
+        msg = f"Command Executed Successfully cmd: {cmd}"
         return True, msg
 
 
@@ -180,14 +186,14 @@ def run_bosboot(module):
     if bos_boot:
         opts += "-a"
 
-        cmd = "bosboot %s " % opts
+        cmd = f"bosboot {opts} "
         rc, stdout, stderr = module.run_command(cmd)
 
         if rc != 0:
-            msg = "Command Execution Failed cmd -   '%s'" % (cmd)
+            msg = f"Command Execution Failed cmd - {cmd}"
             module.fail_json(msg=msg, rc=rc, stdout=stdout, stderr=stderr)
         else:
-            msg = "Command Executed Successfully output- '%s'" % (stdout)
+            msg = f"Command Executed Successfully output- {stdout}"
             return True, msg
 
     return None
