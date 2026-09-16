@@ -102,6 +102,16 @@ options:
     description:
     - Specifies a Network File System (NFS) server for NFS filesystem.
     type: str
+  nfs_version:
+    description:
+    - Specifies the NFS version to be used during NFS mount.
+    type: str
+    choices: [ 'any', '2', '3', '4' ]
+  nfs_sec_methods:
+    description:
+    - List of security methods to be used when attempting mount.
+    type: list
+    elements: str
 notes:
   - You can refer to the IBM documentation for additional information on the commands used at
     U(https://www.ibm.com/support/knowledgecenter/ssw_aix_72/c_commands/chfsmnt.html),
@@ -110,6 +120,10 @@ notes:
     U(https://www.ibm.com/support/knowledgecenter/ssw_aix_72/m_commands/mknfsmnt.html),
     U(https://www.ibm.com/support/knowledgecenter/ssw_aix_72/r_commands/rmfs.html),
     U(https://www.ibm.com/support/knowledgecenter/ssw_aix_72/r_commands/rmnfsmnt.html).
+  - 'Parameter requirements based on I(action):'
+  - If I(action=present) and a filesystem needs to be created, then C(size) is required.
+  - If I(action=present) and a local filesystem needs to be created, you need to use
+    either C(vg) or C(device), both can not used together.
 '''
 
 EXAMPLES = r'''
@@ -374,6 +388,8 @@ def nfs_opts(module):
     perms = module.params["permissions"]
     mgroup = module.params["mount_group"]
     nfs_soft_mount = module.params["nfs_soft_mount"]
+    nfs_version = module.params['nfs_version']
+    sec_methods = module.params['nfs_sec_methods']
 
     opts = ""
     if amount == "yes":
@@ -389,6 +405,13 @@ def nfs_opts(module):
 
     if mgroup:
         opts += f"-m {mgroup} "
+
+    if nfs_version:
+        opts += f"-K {nfs_version} "
+
+    if sec_methods:
+        methods = ','.join(sec_methods)
+        opts += f"-M {methods} "
 
     return opts
 
@@ -447,9 +470,21 @@ def chfs(module, filesystem):
         opts = nfs_opts(module)
         device = module.params["device"]
         nfs_server = module.params["nfs_server"]
+
+        # Idempotency check added for issue #672
+        if not opts:
+            result['msg'] = "All the provided attributes are already set."
+            module.exit_json(**result)
+
         cmd = f"chnfsmnt {opts} -f {filesystem} -d {device} -h {nfs_server}"
     else:
         opts = fs_opts(module)
+
+        # Idempotency check added for issue #672
+        if not opts:
+            result['msg'] = "All the provided attributes are already set."
+            module.exit_json(**result)
+
         cmd = f"chfs {opts} {filesystem}"
 
     result["cmd"] = cmd
@@ -492,11 +527,18 @@ def mkfs(module, filesystem):
     else:
         # Create a local filesystem
         opts = fs_opts(module)
+        if '-a size=' not in opts:
+            result['msg'] = "You need to provide size when trying to create a filesystem."
+            module.fail_json(**result)
 
         fs_type = module.params['fs_type']
 
         vg = module.params['vg']
         if vg:
+            if device:
+                result['msg'] = "You can only use one of the following while creating a filesystem:"
+                result['msg'] += " vg, device"
+                module.fail_json(**result)
             vg = f"-g {vg} "
         else:
             vg = ""
@@ -580,6 +622,8 @@ def main():
             mount_group=dict(type='str'),
             nfs_server=dict(type='str'),
             nfs_soft_mount=dict(type='bool', default='False'),
+            nfs_version=dict(type='str', choices=['any', '2', '3', '4']),
+            nfs_sec_methods=dict(type='list', elements='str'),
             state=dict(type='str', default='present', choices=['absent', 'present']),
             rm_mount_point=dict(type='bool', default='false'),
             filesystem=dict(type='str', required=True),

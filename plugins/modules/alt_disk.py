@@ -30,8 +30,10 @@ options:
     - C(copy) to perform and alternate disk copy.
     - C(clean) to cleanup an existing alternate disk copy.
     - C(install) to install filesets, fixes in existing alternate disk.
+    - C(wakeup) to performs a wake-up on the root volume group located on the target_disk.
+    - C(sleep) to sleep the alternate root volume group that experienced the previous "wake" operation.
     type: str
-    choices: [ copy, clean, install ]
+    choices: [ copy, clean, install, wakeup, sleep]
     default: copy
   targets:
     description:
@@ -63,6 +65,11 @@ options:
   bootlist:
     description:
     - When I(action=copy), specifies to run bootlist after the alternate disk copy.
+    type: bool
+    default: no
+  skip_disk_bootability_checks:
+    description:
+    - When I(action=copy), skips disk bootability checks.
     type: bool
     default: no
   remain_nim_client:
@@ -117,6 +124,23 @@ options:
     - Allows the removal or cleanup of existing old rootvg as well.
     type: bool
     default: no
+  rebuild_boot_image:
+    description:
+    - Rebuilds the alternate boot image before putting the volume group to sleep.
+    type: bool
+    default: false
+  phases_to_execute:
+    description:
+    - When I(action=copy), specifies the phase or phases to execute during this invocation of alt_disk_copy.
+    - C(1) only phases 1 to execute
+    - C(2) only phases 2 to execute
+    - C(3) only phases 3 to execute
+    - C(12) phases 1 and phases 2 to execute
+    - C(23) phases 2 and phases 3 to execute
+    - C(all) all phases to execute (default)
+    type: str
+    choices: [ '1', '2', '3', '12', '23', 'all' ]
+
 notes:
   - M(ibm.power_aix.alt_disk) only backs up mounted file systems. Mount all file
     systems that you want to back up.
@@ -170,9 +194,13 @@ stderr:
     description: The standard error.
     returned: always
     type: str
+targets:
+    description: List of disk names affected by the operation.
+    returned: always
+    type: list
+    elements: str
+    sample: ['hdisk1', 'hdisk2']
 '''
-
-
 from ansible.module_utils.basic import AnsibleModule
 __metaclass__ = type
 
@@ -181,6 +209,21 @@ import re
 
 results = None
 mirrors = -1
+
+
+def get_last_phase_number():
+    filepath = "/var/adm/ras/alt_disk_inst.log"
+    try:
+        with open(filepath, 'r') as file:
+            lines = file.readlines()
+
+        for line in reversed(lines):
+            match = re.search(r'Phase\s+(\d+)', line)
+            if match:
+                return int(match.group(1))
+        return 0  # No phase number found
+    except FileNotFoundError:
+        return 0
 
 
 def get_pvs(module):
@@ -286,6 +329,7 @@ def find_valid_altdisk(module, hdisks, rootvg_info, disk_size_policy, force, all
     # check an alternate disk does not already exist
     found_altdisk = ''
     found_oldrootvg = ''
+    phase = module.params['phases_to_execute']
     for pv in pvs:
         if pvs[pv]['vg'] == 'altinst_rootvg':
             found_altdisk = pv
@@ -294,6 +338,35 @@ def find_valid_altdisk(module, hdisks, rootvg_info, disk_size_policy, force, all
         if allow_old_rootvg and pvs[pv]['vg'] == 'old_rootvg':
             found_oldrootvg = pv
             break
+    # phases to execute during this invocation
+
+    if found_altdisk and phase and not module.params['force']:
+        old_phase = get_last_phase_number()  # 1 / 2 / 3
+        if phase == "all":
+            if old_phase == 3:
+                results['msg'] = f"All phases already completed for disk {hdisks}. Nothing to do."
+                results['changed'] = False
+                module.exit_json(**results)
+            else:
+                return
+        if (old_phase == 1 and phase in ("2", "23")) or (old_phase == 2 and phase == "3"):
+            return
+
+        # block if ANY requested phase already completed
+        elif any(int(p) <= old_phase for p in phase if p.isdigit()):
+            results['msg'] = f"Phase {phase} is not allowed because phase {old_phase} is already completed for disk {hdisks}."
+            results['changed'] = False
+            module.exit_json(**results)
+        elif old_phase == 1 and phase == "3":
+            results['msg'] = f"After phase 1, only phase 2 or 23 is allowed. You are trying phase {phase}."
+            module.fail_json(**results)
+    elif found_altdisk and (phase not in ('1', '12', 'all')) and module.params['force']:
+        results['msg'] = 'The force option can only be used when phases_to_execute is set to one of the following: 1, 12 or all'
+        module.fail_json(**results)
+    elif not found_altdisk and phase in ("2", "23", "3"):
+        results['msg'] = f"Phase 1 has not been executed. Cannot run phase {phase} directly."
+        module.fail_json(**results)
+
     if found_altdisk or found_oldrootvg:
         if not force:
             if found_altdisk:
@@ -569,6 +642,8 @@ def alt_disk_copy(module, params, hdisks, allow_old_rootvg):
     cmd = ['alt_disk_copy', '-d', ' '.join(hdisks)]
     if not params['bootlist']:
         cmd += ['-B']
+    if params['skip_disk_bootability_checks']:
+        cmd += ['-g']
     if params['remain_nim_client']:
         cmd += ['-n']
     if params['device_reset']:
@@ -577,6 +652,8 @@ def alt_disk_copy(module, params, hdisks, allow_old_rootvg):
         cmd += ['-x', params['first_boot_script']]
     if params['resolvconf']:
         cmd += ['-R', params['resolvconf']]
+    if params['phases_to_execute']:
+        cmd += ['-P', params['phases_to_execute']]
 
     ret, stdout, stderr = module.run_command(cmd)
     results['rc'] = ret
@@ -588,6 +665,7 @@ def alt_disk_copy(module, params, hdisks, allow_old_rootvg):
         # an error occured during alt_disk_copy
         results['msg'] = f'Failed to copy {hdisks}: return code {ret}.'
         module.fail_json(**results)
+    results['targets'] = list(hdisks)
     results['changed'] = True
 
 
@@ -675,7 +753,57 @@ def alt_disk_clean(module, hdisks, allow_old_rootvg):
             results['msg'] = f'Command \'{cmd}\' fail with return code {ret}.'
             module.fail_json(**results)
 
+    results['targets'] = hdisks
     results['changed'] = True
+
+
+def check_phases_to_execute(module):
+    """
+    Check which phases need to execute :
+    arguments:
+        module  (dict): The Ansible module
+    """
+    # get pv list
+    hdisks = module.params['existing_altinst_rootvg']
+    pvs = get_pvs(module)
+    if pvs is None:
+        results['msg'] = "pvs is null so no need to execute."
+        module.fail_json(**results)
+    # check an alternate disk does not already exist
+    found_altdisk = ''
+    phase = module.params['phases_to_execute']
+    for pv in pvs:
+        if pvs[pv]['vg'] == 'altinst_rootvg':
+            found_altdisk = pv
+            break
+    # phases to execute during this invocation
+
+    if found_altdisk and phase and not module.params['force']:
+        old_phase = get_last_phase_number()  # 1 / 2 / 3
+        if phase == "all":
+            if old_phase == 3:
+                results['msg'] = f"All phases already completed for disk {hdisks}. Nothing to do."
+                results['changed'] = False
+                module.exit_json(**results)
+            else:
+                return
+        if (old_phase == 1 and phase in ("2", "23")) or (old_phase == 2 and phase == "3"):
+            return
+
+        # block if ANY requested phase already completed
+        elif any(int(p) <= old_phase for p in phase if p.isdigit()):
+            results['msg'] = f"Phase {phase} is not allowed because phase {old_phase} is already completed for disk {hdisks}."
+            results['changed'] = False
+            module.exit_json(**results)
+        elif old_phase == 1 and phase == "3":
+            results['msg'] = f"After phase 1, only phase 2 or 23 is allowed. You are trying phase {phase}."
+            module.fail_json(**results)
+    elif found_altdisk and (phase not in ('1', '12', 'all')) and module.params['force']:
+        results['msg'] = 'The force option can only be used when phases_to_execute is set to one of the following: 1, 12 or all'
+        module.fail_json(**results)
+    elif not found_altdisk and phase in ("2", "23", "3"):
+        results['msg'] = f"Phase 1 has not been executed. Cannot run phase {phase} directly."
+        module.fail_json(**results)
 
 
 def alt_rootvg_op(module):
@@ -686,6 +814,8 @@ def alt_rootvg_op(module):
     """
 
     cmd = ['alt_disk_copy']
+    phase = module.params['phases_to_execute']
+    action = module.params['action']
 
     if not module.params['image_location']:
         msg = 'Please provide the image location.'
@@ -696,6 +826,13 @@ def alt_rootvg_op(module):
         msg = 'Please provide bundle_name or apar_fixes or filesets'
         results['msg'] = msg
         module.fail_json(**results)
+    if module.params['phases_to_execute']:
+        if phase in ("1", "2", "23"):
+            results['msg'] = f"Phase {phase} is not allowed in action {action}."
+            results['changed'] = False
+            module.fail_json(**results)
+
+        check_phases_to_execute(module)
 
     if module.params['bundle_name']:
         cmd += ['-b', module.params['bundle_name']]
@@ -706,6 +843,9 @@ def alt_rootvg_op(module):
     else:
         cmd += ['-w', module.params['filesets']]
 
+    if module.params['phases_to_execute']:
+        cmd += ['-P', module.params['phases_to_execute']]
+
     if module.params['installp_flags']:
         cmd += ['-I', module.params['installp_flags']]
 
@@ -714,12 +854,110 @@ def alt_rootvg_op(module):
 
     ret, stdout, stderr = module.run_command(cmd)
 
+    results['rc'] = ret
+    results['cmd'] = ' '.join(cmd)
+    results['stdout'] = stdout
+    results['stderr'] = stderr
+
     if ret:
         results['stdout'] = stdout
         results['stderr'] = stderr
         results['msg'] = f'Command \'{cmd}\' failed with return code {ret}.'
         module.fail_json(**results)
 
+    results['targets'] = [module.params['existing_altinst_rootvg']]
+    results['changed'] = True
+
+
+def alt_rootvg_wakeup(module):
+    """
+    Performs a wake-up operation on the root volume group located on the target disk.
+    arguments:
+        module  (dict): The Ansible module
+    """
+
+    found_altdisk_for_wakeup = False
+    hdisks = module.params['targets']
+    sleeping_hdisks = []
+    if not hdisks:
+        results['msg'] = 'Please provide the target disk for the wake-up operation'
+        module.fail_json(**results)
+
+    pvs = get_pvs(module)
+    if pvs is None:
+        module.fail_json(**results)
+
+    found_altdisk = False
+
+    if hdisks:
+        # Check that all specified disks exist and belong to altinst_rootvg
+        for hdisk in hdisks:
+            if (hdisk not in pvs) or (pvs[hdisk]['vg'] != 'altinst_rootvg'):
+                results['msg'] = f'Specified disk \'{hdisk}\' is not an alternate install rootvg'
+                module.fail_json(**results)
+
+            if pvs[hdisk]['status'] == '':
+                found_altdisk_for_wakeup = True
+                sleeping_hdisks.append(hdisk)
+            found_altdisk = True
+
+    if not found_altdisk_for_wakeup:  # preserve idempotency
+        results['msg'] += "The alternate install rootvg has already been woken up. "
+        return
+    if found_altdisk:
+        cmd = ['/usr/sbin/alt_rootvg_op', '-W', '-d', ' '.join(sleeping_hdisks)]
+        ret, stdout, stderr = module.run_command(cmd)
+        if ret:
+            results['stdout'] = stdout
+            results['stderr'] = stderr
+            results['msg'] = f'Command \'{cmd}\' failed with return code {ret}.'
+            module.fail_json(**results)
+
+    results['targets'] = sleeping_hdisks
+    results['changed'] = True
+
+
+def alt_rootvg_sleep(module):
+    """
+    Puts an alternate root volume group that was previously woken up back to sleep
+    and optionally rebuilds the boot image.
+    arguments:
+        module  (dict): The Ansible module
+    """
+    pvs = get_pvs(module)
+    if pvs is None:
+        module.fail_json(**results)
+    found_altdisk = False
+    found_altdisk_for_sleep = False
+    # Retrieve the list of disks that belong to altinst_rootvg
+    hdisks = []
+    for pv, value in pvs.items():
+        if value['vg'] == 'altinst_rootvg':
+            if value['status'] == 'active':
+                found_altdisk_for_sleep = True
+            found_altdisk = True
+            hdisks.append(pv)
+        module.debug(f'{pv}: {value}')
+    if not hdisks:
+        results['msg'] = 'There is no alternate install rootvg found'
+        module.fail_json(**results)
+    if not found_altdisk_for_sleep:  # preserve idempotency
+        results['msg'] += "alternate install rootvg is already in sleep mode. "
+        return
+
+    if found_altdisk:
+        cmd = ['/usr/sbin/alt_rootvg_op', '-S']
+        if module.params.get('rebuild_boot_image'):
+            cmd.append('-t')
+        ret, stdout, stderr = module.run_command(cmd)
+        if ret:
+            module.fail_json(
+                msg=f"Command '{' '.join(cmd)}' failed with return code {ret}.",
+                stdout=stdout,
+                stderr=stderr
+            )
+
+    results['targets'] = hdisks
     results['changed'] = True
 
 
@@ -729,7 +967,7 @@ def main():
     module = AnsibleModule(
         argument_spec=dict(
             action=dict(type='str',
-                        choices=['copy', 'clean', 'install'], default='copy'),
+                        choices=['copy', 'clean', 'install', 'wakeup', 'sleep'], default='copy'),
             targets=dict(type='list', elements='str'),
             disk_size_policy=dict(type='str',
                                   choices=['minimize', 'upper', 'lower', 'nearest']),
@@ -742,10 +980,13 @@ def main():
             force=dict(type='bool', default=False),
             bootlist=dict(type='bool', default=False),
             remain_nim_client=dict(type='bool', default=False),
+            skip_disk_bootability_checks=dict(type='bool', default=False),
             device_reset=dict(type='bool', default=False),
             first_boot_script=dict(type='str'),
             resolvconf=dict(type='str'),
             allow_old_rootvg=dict(type='bool', default=False),
+            rebuild_boot_image=dict(type='bool', default=False),
+            phases_to_execute=dict(type='str', choices=['1', '2', '3', '12', '23', 'all']),
         ),
         mutually_exclusive=[
             ['targets', 'disk_size_policy']
@@ -757,6 +998,7 @@ def main():
         msg='',
         stdout='',
         stderr='',
+        targets=[],
     )
 
     # Make sure we are not running on a VIOS.
@@ -774,10 +1016,14 @@ def main():
         alt_disk_copy(module, module.params, targets, allow_old_rootvg)
     elif action == 'clean':
         alt_disk_clean(module, targets, allow_old_rootvg)
+    elif action == 'wakeup':
+        alt_rootvg_wakeup(module)
+    elif action == 'sleep':
+        alt_rootvg_sleep(module)
     else:
         alt_rootvg_op(module)
 
-    results['msg'] += f'alt_disk {action} operation completed successfully'
+    results['msg'] += f"alt_disk {action} operation completed successfully on disk {results['targets']}"
     module.exit_json(**results)
 
 

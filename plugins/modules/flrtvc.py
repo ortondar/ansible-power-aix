@@ -189,19 +189,19 @@ meta:
             type: list
             elements: str
             sample: see sample of meta
-        0.report:
+        report:
             description: Output of the FLRTVC script, report and details on flrtvc error if any.
             returned: if the FLRTVC script succeeds
             type: list
             elements: str
             sample: see sample of meta
-        1.parse:
+        parse:
             description: List of URLs to download and details on parsing error if any.
             returned: if the FLRTVC report parsing succeeds
             type: list
             elements: str
             sample: see sample of meta
-        2.discover:
+        discover:
             description:
             - List of epkgs found in URLs.
             - URLs can be eFix or tar files or directories needing parsing.
@@ -209,13 +209,13 @@ meta:
             type: list
             elements: str
             sample: see sample of meta
-        3.download:
+        download:
             description: List of downloaded epkgs.
             returned: if download operation succeeds
             type: list
             elements: str
             sample: see sample of meta
-        4.1.reject:
+        reject:
             description:
             - List of epkgs rejected. Can be because installed levels do not match ifix required
               levels or because a file is or will be locked by an other ifix installation.
@@ -224,13 +224,13 @@ meta:
             type: list
             elements: str
             sample: see sample of meta
-        4.2.check:
+        check:
             description: List of epkgs matching the prerequisites and trying to install.
             returned: if check succeeds
             type: list
             elements: str
             sample: see sample of meta
-        5.install:
+        install:
             description: List of epkgs actually installed on the system.
             returned: if install succeeds
             type: list
@@ -238,7 +238,7 @@ meta:
             sample: see sample of meta
     sample:
         "meta": {
-            "0.report": [
+            "report": [
                 "Fileset|Current Version|Type|EFix Installed|Abstract|Unsafe Versions|APARs|Bulletin URL|Download URL|CVSS Base Score|Reboot Required|
                  Last Update|Fixed In",
                 "bos.net.tcp.client_core|7.2.3.15|sec||NOT FIXED - There is a vulnerability in FreeBSD that affects AIX.|7.2.3.0-7.2.3.15|
@@ -246,12 +246,12 @@ meta:
                  ftp://aix.software.ibm.com/aix/efixes/security/freebsd_fix.tar|CVE-2018-6922:7.5|NO|11/08/2018|7200-03-03",
                 ...,
             ],
-            "1.parse": [
+            "parse": [
                 "ftp://aix.software.ibm.com/aix/efixes/security/ntp_fix12.tar",
                 "ftp://aix.software.ibm.com/aix/efixes/security/tcpdump_fix4.tar",
                 ...,
             ],
-            "2.discover": [
+            "discover": [
                 "ntp_fix12/IJ17059m9b.190719.epkg.Z",
                 "ntp_fix12/IJ17060m9a.190628.epkg.Z",
                 ...,
@@ -259,7 +259,7 @@ meta:
                 "tcpdump_fix4/IJ12978sBa.190215.epkg.Z",
                 ...,
             ],
-            "3.download": [
+            "download": [
                 "/usr/sys/inst.images/tardir/ntp_fix12/IJ17059m9b.190719.epkg.Z",
                 "/usr/sys/inst.images/tardir/ntp_fix12/IJ17060m9a.190628.epkg.Z",
                 ...,
@@ -267,7 +267,7 @@ meta:
                 "/usr/sys/inst.images/tardir/tcpdump_fix4/IJ12978sBa.190215.epkg.Z",
                 ...,
             ],
-            "4.1.reject": [
+            "reject": [
                 "102p_fix: prerequisite openssl.base levels do not satisfy condition string: 1.0.2.1600 =< 1.0.2.1500 =< 1.0.2.1600",
                 ...,
                 "IJ12983m2a: locked by previous efix to install",
@@ -275,11 +275,11 @@ meta:
                 "IJ17059m9b: prerequisite missing: ntp.rte",
                 ...,
             ],
-            "4.2.check": [
+            "check": [
                 "/usr/sys/inst.images/tardir/tcpdump_fix5/IJ20785s2a.191119.epkg.Z",
                 ...,
             ],
-            "5.install": [
+            "install": [
                 "/usr/sys/inst.images/tardir/tcpdump_fix5/IJ20785s2a.191119.epkg.Z",
                 ...,
             ],
@@ -972,7 +972,7 @@ def run_flrtvc(flrtvc_path, params, force):
         params     (dict): The parameters to pass to flrtvc command
         force      (bool): The flag to automatically remove efixes
     note:
-        Create and build results['meta']['0.report']
+        Create and build results['meta']['report']
     return:
         True if flrtvc succeeded
         False otherwise
@@ -1033,7 +1033,7 @@ def run_flrtvc(flrtvc_path, params, force):
 
     parsed_out = parse_stdout(stdout)
 
-    results['meta'].update({'0.report': parsed_out})
+    results['meta'].update({'report': parsed_out})
 
     # Save to file
     if params['save_report']:
@@ -1066,17 +1066,17 @@ def run_parser(report, localpatchserver, localpatchpath):
     args:
         report  (str): The compact report
     note:
-        Create and build results['meta']['1.parse']
+        Create and build results['meta']['parse']
     """
 
     protocol = module.params['protocol']
     dict_rows = csv.DictReader(report, delimiter='|')
     rule1 = r'^(http|https|ftp)://(aix.software.ibm.com|public.dhe.ibm.com)'
-    rule2 = r'/(aix/ifixes/.*?/|aix/efixes/security/.*?.tar)$'
+    rule2 = r'/(aix/ifixes/.*?/?|aix/efixes/security/.*?.tar)$'
     if localpatchserver != "":
         rule1 = r'^(http|https|ftp)://(aix.software.ibm.com|public.dhe.ibm.com|' + localpatchserver + ')'
     if localpatchpath != "":
-        rule2 = r'/(aix/ifixes/.*?/|aix/efixes/security/.*?.tar|' + localpatchpath + '/.*?.tar)$'
+        rule2 = r'/(aix/ifixes/.*?/?|aix/efixes/security/.*?.tar|' + localpatchpath + '/.*?.tar)$'
 
     pattern = re.compile(rule1 + rule2)
 
@@ -1095,7 +1095,7 @@ def run_parser(report, localpatchserver, localpatchpath):
     rows = list(set(selected_rows))  # remove duplicates
     debug_len = len(rows)
     module.debug(f'extracted {debug_len} urls in the report')
-    results['meta'].update({'1.parse': rows})
+    results['meta'].update({'parse': rows})
 
 
 def run_downloader(urls, dst_path, resize_fs=True):
@@ -1107,16 +1107,31 @@ def run_downloader(urls, dst_path, resize_fs=True):
         resize_fs (bool): Increase the filesystem size if needed
     note:
         Create and build
-            results['meta']['2.discover']
-            results['meta']['3.download']
-            results['meta']['4.1.reject']
-            results['meta']['4.2.check']
+            results['meta']['discover']
+            results['meta']['download']
+            results['meta']['reject']
+            results['meta']['check']
+            results['meta']['installp']
+        installp contains a list of directory paths where installp
+        filesets were found.  Actual installation happens in main().
     """
     out = {'messages': results['meta']['messages'],
-           '2.discover': [],
-           '3.download': [],
-           '4.1.reject': [],
-           '4.2.check': []}
+           'discover': [],
+           'download': [],
+           'reject': [],
+           'check': [],
+           'installp': []}
+
+    # Get OS major version once at the start (for nested tar filtering)
+    os_ver = ''
+    cmd = ['/usr/bin/oslevel', '-s']
+    rc, stdout, stderr = module.run_command(cmd)
+    if rc == 0:
+        os_ver = stdout.strip()[:2]  # '73' for AIX 7.3
+        module.debug(f'Detected OS version: {os_ver}')
+
+    # Track processed subdirectories to avoid duplicate nested tar processing
+    processed_subdirs = set()
 
     for url in urls:
         protocol, srv, rep, name = re.search(r'^(.*?)://(.*?)/(.*)/(.*)$', url).groups()
@@ -1124,12 +1139,12 @@ def run_downloader(urls, dst_path, resize_fs=True):
 
         if '.epkg.Z' in name:  # URL as an efix file
             module.debug('treat url as an epkg file')
-            out['2.discover'].append(name)
+            out['discover'].append(name)
 
             # download epkg file
             epkg = os.path.abspath(os.path.join(dst_path, name))
             if download(url, epkg, resize_fs):
-                out['3.download'].append(epkg)
+                out['download'].append(epkg)
 
         elif '.tar' in name:  # URL as a tar file
             module.debug('treat url as a tar file')
@@ -1137,51 +1152,201 @@ def run_downloader(urls, dst_path, resize_fs=True):
 
             # download and open tar file
             if download(url, dst, resize_fs):
-                with tarfile.open(dst, mode='r', encoding="utf-8") as tar:
-
-                    # find all epkg in tar file
-                    epkgs = [epkg for epkg in tar.getnames() if re.search(r'(\b[\w.-]+.epkg.Z\b)$', epkg)]
-                    out['2.discover'].extend(epkgs)
-                    debug_len = len(epkgs)
-                    module.debug(f'found {debug_len} epkg.Z file in tar file')
-
-                    # extract epkg
+                if zipfile.is_zipfile(dst):
+                    module.debug(f'{dst} detected as zip archive, extracting as zip')
                     tar_dir = os.path.join(dst_path, 'tardir')
                     if not os.path.exists(tar_dir):
                         os.makedirs(tar_dir)
-                    for epkg in epkgs:
-                        for attempt in range(3):
-                            try:
-                                tar.extract(epkg, tar_dir)
-                            except (OSError, IOError, tarfile.TarError) as exc:
-                                if resize_fs:
-                                    increase_fs(tar_dir)
-                                else:
-                                    msg = f'Cannot extract tar file {epkg} to {tar_dir}'
+                    try:
+                        with zipfile.ZipFile(dst) as zfile:
+                            epkgs = [f for f in zfile.namelist() if re.search(r'(\b[\w.-]+\.epkg\.Z\b)$', f)]
+                            out['discover'].extend(epkgs)
+                            module.debug(f'found {len(epkgs)} epkg.Z file in zip archive')
+                            for epkg in epkgs:
+                                try:
+                                    zfile.extract(epkg, tar_dir)
+                                    out['download'].append(os.path.abspath(os.path.join(tar_dir, epkg)))
+                                except (OSError, IOError) as exc:
+                                    msg = f'Cannot extract {epkg} from zip to {tar_dir}'
                                     module.log(msg)
                                     module.log(f'EXCEPTION {exc}')
                                     results['meta']['messages'].append(msg)
+                    except (zipfile.BadZipFile, zipfile.LargeZipFile, RuntimeError) as exc:
+                        msg = f'Cannot open {dst} as zip archive'
+                        module.log(msg)
+                        module.log(f'EXCEPTION {exc}')
+                        results['meta']['messages'].append(msg)
+                elif tarfile.is_tarfile(dst):
+                    try:
+                        with tarfile.open(dst, mode='r', encoding="utf-8") as tar:
+
+                            # find all epkg in tar file
+                            epkgs = [epkg for epkg in tar.getnames() if re.search(r'(\b[\w.-]+.epkg.Z\b)$', epkg)]
+                            out['discover'].extend(epkgs)
+                            debug_len = len(epkgs)
+                            module.debug(f'found {debug_len} epkg.Z file in tar file')
+
+                            # extract full tar content once (covers both epkg.Z and installp nested tars)
+                            tar_dir = os.path.join(dst_path, 'tardir')
+                            if not os.path.exists(tar_dir):
+                                os.makedirs(tar_dir)
+                            for attempt in range(3):
+                                try:
+                                    tar.extractall(path=tar_dir, filter='data')
+                                except (OSError, IOError, tarfile.TarError) as exc:
+                                    if resize_fs:
+                                        increase_fs(tar_dir)
+                                    else:
+                                        msg = f'Cannot extract tar file to {tar_dir}'
+                                        module.log(msg)
+                                        module.log(f'EXCEPTION {exc}')
+                                        results['meta']['messages'].append(msg)
+                                        break
+                                else:
+                                    module.debug(f'Successfully extracted full tar content to {tar_dir}')
                                     break
                             else:
-                                break
-                        else:
-                            msg = f'Cannot extract tar file {epkg} to {tar_dir}'
-                            module.log(msg)
-                            results['meta']['messages'].append(msg)
-                            continue
-                        out['3.download'].append(os.path.abspath(os.path.join(tar_dir, epkg)))
+                                msg = f'Cannot extract tar file to {tar_dir} after retries'
+                                module.log(msg)
+                                results['meta']['messages'].append(msg)
+
+                            for epkg in epkgs:
+                                extracted = os.path.abspath(os.path.join(tar_dir, epkg))
+                                if os.path.exists(extracted):
+                                    out['download'].append(extracted)
+                                else:
+                                    msg = f'Expected extracted file not found: {extracted}'
+                                    module.log(msg)
+                                    results['meta']['messages'].append(msg)
+
+                        # Process nested tar files for installp packages
+                        # Skip if already processed (avoids duplicate work when multiple URLs point to same tardir)
+                        if os.path.exists(tar_dir):
+                            for subdir in os.listdir(tar_dir):
+                                subdir_path = os.path.join(tar_dir, subdir)
+
+                                # Skip if already processed
+                                if subdir_path in processed_subdirs:
+                                    module.debug(f'Skipping already processed subdir: {subdir_path}')
+                                    continue
+
+                                processed_subdirs.add(subdir_path)
+                                if not os.path.isdir(subdir_path):
+                                    continue
+
+                                module.debug(f'Processing subdirectory: {subdir_path}')
+
+                                # Filter nested tars by OS version if available
+                                nested_tars = []
+                                all_files = os.listdir(subdir_path)
+
+                                # Prefer version-specific tars (e.g., 73bind918.tar for AIX 7.3)
+                                if os_ver:
+                                    version_specific = [f for f in all_files if f.startswith(os_ver) and f.endswith('.tar')]
+                                    if version_specific:
+                                        nested_tars = version_specific
+                                        module.debug(f'Found version-specific tars for AIX {os_ver}: {nested_tars}')
+
+                                # Fall back to all tar files if no version-specific ones found
+                                if not nested_tars:
+                                    nested_tars = [f for f in all_files if f.endswith(('.tar', '.tar.Z'))]
+
+                                # Extract nested tar files and track which ones succeeded
+                                failed_extractions = set()
+                                for nested_file in nested_tars:
+                                    nested_path = os.path.join(subdir_path, nested_file)
+                                    module.debug(f'Extracting nested tar: {nested_file}')
+
+                                    try:
+                                        if nested_file.endswith('.tar.Z'):
+                                            # Uncompress .tar.Z files with retry on space errors
+                                            cmd = f'uncompress -c {nested_path} | tar -xf - -C {subdir_path}'
+                                            rc, stdout, stderr = module.run_command(cmd, use_unsafe_shell=True)
+                                            if rc != 0 and resize_fs and 'No space' in stderr:
+                                                increase_fs(subdir_path)
+                                                rc, stdout, stderr = module.run_command(cmd, use_unsafe_shell=True)
+                                            if rc == 0:
+                                                module.debug(f'Extracted nested .tar.Z: {nested_file}')
+                                            else:
+                                                failed_extractions.add(nested_file)
+                                                msg = f'Failed to extract {nested_file}: {stderr}'
+                                                module.log(msg)
+                                                results['meta']['messages'].append(msg)
+                                        else:
+                                            # Extract regular .tar files
+                                            extracted = False
+                                            for attempt in range(3):
+                                                try:
+                                                    with tarfile.open(nested_path, mode='r') as nested_tar:
+                                                        nested_tar.extractall(path=subdir_path, filter='data')
+                                                        module.debug(f'Extracted nested tar: {nested_file}')
+                                                        extracted = True
+                                                        break
+                                                except (OSError, IOError, tarfile.TarError) as exc:
+                                                    if resize_fs and attempt < 2:
+                                                        increase_fs(subdir_path)
+                                                    else:
+                                                        msg = f'Cannot extract nested tar {nested_file}: {exc}'
+                                                        module.log(msg)
+                                                        results['meta']['messages'].append(msg)
+                                                        break
+                                            if not extracted:
+                                                failed_extractions.add(nested_file)
+                                    except Exception as exc:
+                                        failed_extractions.add(nested_file)
+                                        msg = f'Cannot extract nested tar {nested_file}: {exc}'
+                                        module.log(msg)
+                                        results['meta']['messages'].append(msg)
+
+                                # Now look for installp packages in nested directories
+                                # Only check directories whose parent tar extracted successfully
+                                for nested_dir in os.listdir(subdir_path):
+                                    nested_dir_path = os.path.join(subdir_path, nested_dir)
+                                    if not os.path.isdir(nested_dir_path):
+                                        continue
+
+                                    # Skip directories from failed extractions
+                                    parent_tar = nested_dir + '.tar.Z'
+                                    parent_tar2 = nested_dir + '.tar'
+                                    if parent_tar in failed_extractions or parent_tar2 in failed_extractions:
+                                        module.debug(f'Skipping {nested_dir_path}: parent tar extraction failed')
+                                        continue
+
+                                    # Check if directory contains installp filesets using installp -ld
+                                    cmd = ['/usr/sbin/installp', '-ld', nested_dir_path]
+                                    rc, stdout, stderr = module.run_command(cmd)
+                                    has_installp = (rc == 0 and 'Fileset Name' in stdout)
+
+                                    if has_installp:
+                                        module.debug(f'Found installp directory: {nested_dir_path}')
+                                        out['installp'].append(nested_dir_path)
+
+                    except tarfile.TarError as exc:
+                        msg = f'Cannot read tar archive {dst}: {exc} (possibly a truncated or incomplete download)'
+                        module.log(msg)
+                        results['meta']['messages'].append(msg)
+                else:
+                    msg = f'Cannot open {dst}: not a valid tar or zip archive (possibly a corrupted or incomplete download)'
+                    module.log(msg)
+                    results['meta']['messages'].append(msg)
 
         else:  # URL as a Directory
             module.debug('treat url as a directory')
 
-            response = open_url(url, validate_certs=False)
+            try:
+                response = open_url(url, validate_certs=False)
+            except Exception as exc:
+                msg = f'Cannot reach directory URL {url}: {exc}'
+                module.log(msg)
+                results['meta']['messages'].append(msg)
+                continue
 
             # find all epkg in html body
             epkgs = re.findall(r'(\b[\w.-]+.epkg.Z\b)', response.read().decode('utf-8'))
 
             epkgs = list(set(epkgs))
 
-            out['2.discover'].extend(epkgs)
+            out['discover'].extend(epkgs)
             debug_len = len(epkgs)
             module.debug(f'found {debug_len} epkg.Z file in html body')
 
@@ -1190,7 +1355,7 @@ def run_downloader(urls, dst_path, resize_fs=True):
                      if download(os.path.join(url, epkg),
                                  os.path.abspath(os.path.join(dst_path, epkg)),
                                  resize_fs)]
-            out['3.download'].extend(epkgs)
+            out['download'].extend(epkgs)
 
     # Get installed filesets' levels
     lpps_lvl = parse_lpps_info()
@@ -1199,8 +1364,7 @@ def run_downloader(urls, dst_path, resize_fs=True):
     curr_efixes = parse_emgr()
 
     # check prerequisite
-    (out['4.2.check'], out['4.1.reject']) = check_epkgs(out['3.download'],
-                                                        lpps_lvl, curr_efixes)
+    (out['check'], out['reject']) = check_epkgs(out['download'], lpps_lvl, curr_efixes)
     results['meta'].update(out)
 
 
@@ -1215,9 +1379,9 @@ def run_installer(epkgs, dst_path, resize_fs=True):
         True if geninstall succeeded
         False otherwise
     note:
-        epkgs should be results['meta']['4.2.check'] which is
+        epkgs should be results['meta']['check'] which is
         sorted against packaging date. Do not change the order.
-        Create and build results['meta']['5.install']
+        Create and build results['meta']['install']
     """
     if not epkgs:
         # There were fixes downloaded but not interim fixes, which are the ones
@@ -1270,7 +1434,7 @@ def run_installer(epkgs, dst_path, resize_fs=True):
     module.debug(f'geninstall stdout:{stdout}')
 
     results['changed'] = True   # Some efixes might be installed
-    results['meta'].update({'5.install': stdout.splitlines()})
+    results['meta'].update({'install': stdout.splitlines()})
 
     if rc != 0:
         msg = f'Cannot perform customization, rc={rc}'
@@ -1317,13 +1481,13 @@ def main():
         meta={'messages': []}
         # meta structure will be updated as follow:
         # meta={'messages': [],     detail execution messages
-        #       '0.report': [],     run_flrtvc reports the vulnerabilities
-        #       '1.parse': [],      run_parser builds the list of URLs
-        #       '2.discover': [],   run_downloader builds the list of epkgs found in URLs
-        #       '3.download': [],   run_downloader builds the list of downloaded epkgs
-        #       '4.1.reject': [],   check_epkgs builds the list of rejected epkgs
-        #       '4.2.check': [],    check_epkgs builds the list of epkgs checking prerequisites
-        #       '5.install': []}    run_installer builds the list of installed epkgs
+        #       'report': [],     run_flrtvc reports the vulnerabilities
+        #       'parse': [],      run_parser builds the list of URLs
+        #       'discover': [],   run_downloader builds the list of epkgs found in URLs
+        #       'download': [],   run_downloader builds the list of downloaded epkgs
+        #       'reject': [],   check_epkgs builds the list of rejected epkgs
+        #       'check': [],    check_epkgs builds the list of epkgs checking prerequisites
+        #       'install': []}    run_installer builds the list of installed epkgs
     )
 
     module.debug('*** START ***')
@@ -1409,13 +1573,13 @@ def main():
     # Parse flrtvc report
     # ===========================================
     module.debug('*** PARSE ***')
-    run_parser(results['meta']['0.report'], localpatchserver, localpatchpath)
+    run_parser(results['meta']['report'], localpatchserver, localpatchpath)
 
     # ===========================================
     # Download and check efixes
     # ===========================================
     module.debug('*** DOWNLOAD ***')
-    run_downloader(results['meta']['1.parse'], workdir, resize_fs)
+    run_downloader(results['meta']['parse'], workdir, resize_fs)
 
     if download_only:
         if clean and os.path.exists(workdir):
@@ -1424,10 +1588,46 @@ def main():
         module.exit_json(**results)
 
     # ===========================================
+    # Install installp packages discovered during download
+    # ===========================================
+    module.debug('*** INSTALLP ***')
+    for installp_dir in results['meta'].get('installp', []):
+        module.debug(f'Checking installp prerequisites for {installp_dir}')
+
+        # Preview first to check if prerequisites are met
+        preview_cmd = ['/usr/sbin/installp', '-acgXY', '-p', '-d', installp_dir, 'all']
+        rc, stdout, stderr = module.run_command(preview_cmd)
+
+        if rc != 0 or 'FAILURES' in stdout or 'The format of the toc file is invalid' in stderr:
+            msg = f'installp failed for {installp_dir}: {stderr.strip() or stdout.strip()}'
+            module.log(msg)
+            results['meta']['messages'].append(msg)
+            continue
+
+        # Check if preview found anything to actually install
+        if '0 Total to be installed' in stdout:
+            module.debug(f'Nothing to install from {installp_dir} (already at latest level)')
+            continue
+
+        # Prerequisites met, proceed with actual installation
+        module.debug(f'Installing installp packages from {installp_dir}')
+        cmd = ['/usr/sbin/installp', '-acgXY', '-d', installp_dir, 'all']
+        rc, stdout, stderr = module.run_command(cmd)
+        if rc != 0:
+            msg = f'installp failed for {installp_dir}: {stderr}'
+            module.log(msg)
+            results['meta']['messages'].append(msg)
+        elif 'Already Installed' in stdout and '0 Total to be installed' in stdout:
+            module.debug(f'Packages from {installp_dir} already installed, no changes made')
+        else:
+            results['changed'] = True
+            module.debug(f'Installed packages from {installp_dir}')
+
+    # ===========================================
     # Install efixes
     # ===========================================
     module.debug('*** UPDATE ***')
-    if not run_installer(results['meta']['4.2.check'], workdir, resize_fs):
+    if not run_installer(results['meta']['check'], workdir, resize_fs):
         msg = 'Failed to install fixes, please check meta and log data.'
         results['msg'] = msg
         if clean and os.path.exists(workdir):

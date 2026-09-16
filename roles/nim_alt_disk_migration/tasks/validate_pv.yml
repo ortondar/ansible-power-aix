@@ -1,6 +1,6 @@
 ---
 ############################################################
-# ATTENTION: DELTE THIS BLOCK IF NOT NEEDED IN FOR SURE
+# ATTENTION: DELETE THIS BLOCK IF NOT NEEDED IN FOR SURE
 ############################################################
 # parsing the nim client hostname from lsnim output
 # - /usr/sbin/lsnim -a if1 {{ nim_alt_disk_migration_nim_client }}
@@ -27,47 +27,58 @@
     /usr/lpp/bos.sysmgt/nim/methods/c_rsh {{ nim_alt_disk_migration_nim_client }}
     '/usr/sbin/lsvg rootvg'
   changed_when: false
-  register: used_pp_output
+  register: nim_alt_disk_migration_used_pp_output
 
 - name: Check if the specified physical volume does not belong to any volume group
   ansible.builtin.shell: >
     /usr/lpp/bos.sysmgt/nim/methods/c_rsh {{ nim_alt_disk_migration_nim_client }}
     '/usr/sbin/getlvodm -j {{ nim_alt_disk_migration_target_disk }}'
   changed_when: false
-  register: pv_availability_output
+  register: nim_alt_disk_migration_pv_availability_output
 
 - name: Fetch specified physical volume size
   ansible.builtin.shell: >
     /usr/lpp/bos.sysmgt/nim/methods/c_rsh {{ nim_alt_disk_migration_nim_client }}
     '/usr/sbin/bootinfo -s {{ nim_alt_disk_migration_target_disk }}'
   changed_when: false
-  register: pv_size_output
+  register: nim_alt_disk_migration_pv_size_output
 
 - name: Parse and sort physical volume info
   block:
-    - ansible.builtin.set_fact:
-        used_pp_pattern: (?<=USED PPs:)[\s0-9]+[\(]([0-9]+)
+    - name: Set regex patterns and PV availability conditions
+      ansible.builtin.set_fact:
+        nim_alt_disk_migration_used_pp_pattern: (?<=USED PPs:)[\s0-9]+[\(]([0-9]+)
         # 0516-320 /usr/sbin/getlvodm: Physical volume hdisk1 is not assigned to
         #        a volume group.
-        pv_available_cond1: "{% if pv_availability_output.stderr.find('0516-320') != -1 %} true {% else %} false {% endif %}"
-    - ansible.builtin.set_fact:
+        nim_alt_disk_migration_pv_available_cond1:
+          "{% if nim_alt_disk_migration_pv_availability_output.stderr.find('0516-320') != -1 %} true {% else %} false {% endif %}"
+    - name: Set PV size and availability condition variables
+      ansible.builtin.set_fact:
         # in megabytes
-        used_pps: "{{ used_pp_output.stdout | regex_search(used_pp_pattern, '\\1') | join('\n') }}"
-        pv_size: "{{ pv_size_output.stdout }}"
-        pv_available_cond1: "{{ pv_available_cond1 | trim }}"
-        pv_available_cond2: "{{ pv_availability_output.stderr == '' }}"
-        pv_available_cond3: "{{ pv_availability_output.stdout == '' }}"
-        pv_available_cond4: "{{ pv_availability_output.rc == 0 }}"
-    - ansible.builtin.set_fact:
-        pv_available: "{{ pv_available_cond1 or (pv_available_cond2 and pv_available_cond3 and pv_available_cond4) }}"
+        nim_alt_disk_migration_used_pps:
+          "{{ nim_alt_disk_migration_used_pp_output.stdout | regex_search(nim_alt_disk_migration_used_pp_pattern, '\\1') | join('\n') }}"
+        nim_alt_disk_migration_pv_size: "{{ nim_alt_disk_migration_pv_size_output.stdout }}"
+        nim_alt_disk_migration_pv_available_cond1: "{{ nim_alt_disk_migration_pv_available_cond1 | trim }}"
+        nim_alt_disk_migration_pv_available_cond2: "{{ nim_alt_disk_migration_pv_availability_output.stderr == '' }}"
+        nim_alt_disk_migration_pv_available_cond3: "{{ nim_alt_disk_migration_pv_availability_output.stdout == '' }}"
+        nim_alt_disk_migration_pv_available_cond4: "{{ nim_alt_disk_migration_pv_availability_output.rc == 0 }}"
+    - name: Determine if PV is available for use
+      ansible.builtin.set_fact:
+        nim_alt_disk_migration_pv_available: >-
+          {{ nim_alt_disk_migration_pv_available_cond1 or
+          (nim_alt_disk_migration_pv_available_cond2 and nim_alt_disk_migration_pv_available_cond3
+          and nim_alt_disk_migration_pv_available_cond4) }}
 
 - name: Validate specified physical volume
   block:
-    - ansible.builtin.fail:
+    - name: Fail if PV belongs to a volume group
+      ansible.builtin.fail:
         msg: Physical volume belongs to a volume group
-      when: not pv_available
-    - ansible.builtin.fail:
+      when: not nim_alt_disk_migration_pv_available
+    - name: Fail if PV does not have enough space
+      ansible.builtin.fail:
         msg: There is not enough space for an alternate disk
-      when: pv_size | int < used_pps | int
-    - ansible.builtin.debug:
+      when: nim_alt_disk_migration_pv_size | int < nim_alt_disk_migration_used_pps | int
+    - name: Display PV validation success message
+      ansible.builtin.debug:
         msg: Specified disk '{{ nim_alt_disk_migration_target_disk }}' is valid

@@ -5,6 +5,206 @@
 Releases
 ========
 
+Version 2.3.1
+-------------
+Notes
+  * Updated the minimum required version of ansible to 2.16.
+  * Fixed all the EDA linting issues reported by Red hat automation hub.
+  * Updated Red hat README.md file to include support details and issues locations
+
+Availability
+  * `Automation Hub v2.3.1`_
+  * `Galaxy v2.3.1`_
+  * `GitHub v2.3.1`_
+
+.. _Automation Hub v2.3.1:
+   https://cloud.redhat.com/ansible/automation-hub/ibm/power_aix
+
+.. _Galaxy v2.3.1:
+   https://galaxy.ansible.com/download/ibm-power_aix-2.3.1.tar.gz
+
+.. _GitHub v2.3.1:
+   https://github.com/IBM/ansible-power-aix/raw/dev-collection/builds/ibm-power_aix-2.3.1.tar.gz
+
+
+Version 2.3.0
+-------------
+Notes
+  * flrt_monitor: NEW EDA plugin which monitors IBM Fix Level Recommendation Tool (FLRT) HIPER/Security CSV for new vulnerabilities and fixes.
+  * aix_filesystem_watch: NEW EDA plugin which emits an event per host per filesystem per interval or only when crossing a threshold.
+  * aix_file_watch: NEW EDA plugin watches file content modifications on AIX hosts over SSH and emit events.
+  * errclear: NEW MODULE which enables Ansible to invoke AIX's errclear utility to delete error log entries based on various filtering criteria.
+  * traceroute: NEW MODULE to trace the route that IP packets take to reach a destination host on AIX systems.
+  * ipsec : NEW ROLE to setup IPsec tunnel.
+  * New demo Rulebooks: demo_aix_file_watch, demo_aix_filesystem_watch, rulebook_dlrt_monitor_severity_based, rulebook_flrt_monitor_basic, rulebook_flrt_monitor_notification_only.
+  * NEW demo Playbooks: demo_errclear.yml, demo_traceroute.yml, demo_setup_ipsec.yml
+  * devices: Enhancement to implement 'defaults' values to ibm.power_aix.devices.
+  * alt_disk: Added feature to also be able to handle phases.
+  * audit: Enhancement to support auditpr command.
+  * filesystem: Added support for -K and -M options. Issue #277.
+  * filesystem: Fix for issue #750
+  * mkfilt: Fix for issue #752
+  * password_rules_policies: Documentation updates
+  * nim: Documentation upates
+  * EDA source plugin placeholder update according to community guidelines.
+  * flirtvc: Added exception handling. Fix for issue #724
+  * inetd role: Fix for issue #744
+  * nim_alt_disk_migration: Fix for issue #728
+  * power_aix_boostrap: Fix for issue #737
+  * installp: Fix for issue #734
+  * alt_disk: Fix for issue #397
+  * devices: Fix for issue #621
+  * alt_disk: Fix for issue #646
+  * Linting failures - ~70 linting failures across various modules/roles/playbooks.
+
+Availability
+  * `Automation Hub v2.3.0`_
+  * `Galaxy v2.3.0`_
+  * `GitHub v2.3.0`_
+
+.. _Automation Hub v2.3.0:
+   https://cloud.redhat.com/ansible/automation-hub/ibm/power_aix
+
+.. _Galaxy v2.3.0:
+   https://galaxy.ansible.com/download/ibm-power_aix-2.3.0.tar.gz
+
+.. _GitHub v2.3.0:
+   https://github.com/IBM/ansible-power-aix/raw/dev-collection/builds/ibm-power_aix-2.3.0.tar.gz
+
+
+Version 2.2.1
+-------------
+Notes
+   * Updated shellcheck/lintings warnings reported by Red hat automation hub.
+   * For latest feature inclusions, see notes for version 2.2.0 below.
+
+Availability
+  * `Automation Hub v2.2.1`_
+  * `Galaxy v2.2.1`_
+  * `GitHub v2.2.1`_
+
+.. _Automation Hub v2.2.1:
+   https://cloud.redhat.com/ansible/automation-hub/ibm/power_aix
+
+.. _Galaxy v2.2.1:
+   https://galaxy.ansible.com/download/ibm-power_aix-2.2.1.tar.gz
+
+.. _GitHub v2.2.1:
+   https://github.com/IBM/ansible-power-aix/raw/dev-collection/builds/ibm-power_aix-2.2.1.tar.gz
+
+Version 2.2.0
+-------------
+Notes
+  * llvupdate: NEW MODULE to perform the Live Library Update (LLU) operation for the specified processes without a downtime for workloads.
+  * clvupdate: NEW module to clean up failed live update operations.
+  * nimclient: NEW MODULE for allowing Network Installation Management (NIM) operations to be performed from a NIM client.
+  * timezone_mgmt: NEW MODULE for managing timezone for AIX systems .
+  * audit: NEW MODULE to run the audit command to Controls system auditing
+  * fcstat: NEW MODULE to collect the log of physical or virtual Fibre Channel device driver.
+  * iostat: NEW MODULE to invoke iostat utility with full flag support
+  * lparstat: NEW MODULE to invoke AIX's lparstat utility with full flag support
+  * netstat: NEW MODULE to collect Routing Table Information statistics
+  * ps: NEW MODULE to collect the status of processes log
+  * entstat: NEW MODULE to collect the Ethernet device driver statistics.
+  * NEW demo playbooks: audit.yml, fcstat.yml, iostat.yml, lparstat.yml, netstat.yml, ps.yml , entstat.yml
+  * New Playbooks - demo_llvupdate.yml, demo_nimclient.yml, demo_timezone_mgmt.yml, demo_clvupdate.yml
+  * emgr: Added support for emgr_sec, emgr_sec_patch, also added system os level in output.
+  * nim: Added support for explicit source type in case of bos_inst operation. Fixes #676
+  * dnf_bootstrap: Fix for issue #677
+  * nim_adm: Fix for #688
+  * emgr: Fix for issue #698
+  * Group: Fix for issue #670
+  * reboot: Fix for issue #679 #676
+  * filesystem: Fix for issue #672
+  * Role linting failures - dnf_bootstrap, nim_adm, vioshc, nim_master_migration, LKU
+  * alt_disk: Feature for Add wakeup and sleep action to alt_disk module #681
+
+Technology-Preview
+  * The following EDA components are provided as Technology Preview and are NOT intended for production use:
+  *  - /plugins/event_source/aix_cpu_watch - watch over CPU utilization and emmit
+     - event in case of surpassing a pre-defined threshold.
+     - A demo rulebook is also shipped as /playbooks/eda/demo_aix_cpu_watch.yml
+  * These components:
+     - Have limited validation
+     - Are subject to change
+     - Do not carry full IBM support
+     - May change or be removed in future releases
+     - Provided as Technology Preview for early evaluation only
+     - Not recommended for production use
+
+Availability
+  * `Automation Hub v2.2.0`_
+  * `Galaxy v2.2.0`_
+  * `GitHub v2.2.0`_
+
+.. _Automation Hub v2.2.0:
+   https://cloud.redhat.com/ansible/automation-hub/ibm/power_aix
+
+.. _Galaxy v2.2.0:
+   https://galaxy.ansible.com/download/ibm-power_aix-2.2.0.tar.gz
+
+.. _GitHub v2.2.0:
+   https://github.com/IBM/ansible-power-aix/raw/dev-collection/builds/ibm-power_aix-2.2.0.tar.gz
+
+Version 2.1.1
+-------------
+Notes
+   * Updated shellcheck warnings reported by Red hat automation hub.
+   * For latest feature inclusions, see notes for version 2.1.0 below.
+
+
+Availability
+  * `Automation Hub v2.1.1`_
+  * `Galaxy v2.1.1`_
+  * `GitHub v2.1.1`_
+
+.. _Automation Hub v2.1.1:
+   https://cloud.redhat.com/ansible/automation-hub/ibm/power_aix
+
+.. _Galaxy v2.1.1:
+   https://galaxy.ansible.com/download/ibm-power_aix-2.1.1.tar.gz
+
+.. _GitHub v2.1.1:
+   https://github.com/IBM/ansible-power-aix/raw/dev-collection/builds/ibm-power_aix-2.1.1.tar.gz
+
+Version 2.1.0
+-------------
+Notes
+   * errpt: NEW MODULE to run the errpt command to report logged system errors
+   * nmon: NEW MODULE to record system statistics.
+   * pagingspace: NEW MODULE to manage paging space
+   * vmstat: NEW MODULE to invoke AIX's vmstat utility with full flag support
+   * password_hash: NEW MODULE to encrypt password with AIX encryption methods. Also, closes issue #548
+   * hdcrypt_auth: NEW MODULE to manage authentication methods for logical volumes
+   * NEW demo playbooks: vmstat.yml, pagingspace.yml, nmon, errpt, hdcrypt_auth
+   * flrtvc.py: Fix for a race condition which reported emgr.txt not found. Fix for issue #579
+   * flrtvc.py: Added support for proxy server
+   * power_aix_bootstrap role: Added support for bootstraping using dnf local repo
+   * snap: Added support for snapcore and snapsplit
+   * emgr: Feature to accept list of files as list and not just as file, github issue #385
+   * user: Fixed regression issue #637
+   * LKU: Option to specify project name along with default project is included. Issue #634
+   * nim_resource: Fix for issue #644
+   * nim_suma: Fixes https://community.ibm.com/community/user/discussion/not-able-to-download-service-pack-through-ansible-automation-platform
+   * alt_disk_install: Documentation update
+   * Fix for issue #635
+   * Includes fix for various linting issues reported by galaxy, automation hub for v 2.0.3
+
+
+Availability
+  * `Automation Hub v2.1.0`_
+  * `Galaxy v2.1.0`_
+  * `GitHub v2.1.0`_
+
+.. _Automation Hub v2.1.0:
+   https://cloud.redhat.com/ansible/automation-hub/ibm/power_aix
+
+.. _Galaxy v2.1.0:
+   https://galaxy.ansible.com/download/ibm-power_aix-2.1.0.tar.gz
+
+.. _GitHub v2.1.0:
+   https://github.com/IBM/ansible-power-aix/raw/dev-collection/builds/ibm-power_aix-2.1.0.tar.gz
+
 Version 2.0.3
 -------------
 Notes
@@ -14,7 +214,7 @@ Notes
    * Enhancement in lvm_facts to include information from lslv command for logical volumes.
    * Fixed sorting issue in flrtvc module.
    * Updated NIM module to accept license.
-   * Crical fixes in tunable module to include -K option for live update flag in AIX 7.3
+   * Critical fixes in tunable module to include -K option for live update flag in AIX 7.3
 
 Availability
   * `Automation Hub v2.0.3`_

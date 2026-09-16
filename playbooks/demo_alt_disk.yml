@@ -3,14 +3,15 @@
   hosts: "{{host_name}}"
   gather_facts: false
   vars:
-    host_name: all
+    host_name: alttest
     targets: hdisk1
 
   tasks:
-    - name: Perform an alternate disk copy of the rootvg to hdisk1
+    - name: Perform an alternate disk copy of the rootvg to hdisk3
       ibm.power_aix.alt_disk:
         action: copy
-        targets: hdisk1
+        targets: hdisk2
+        force: true
 
     - name: Perform an alternate disk copy of the rootvg to the nearest disk that can be selected
       ibm.power_aix.alt_disk:
@@ -27,8 +28,73 @@
     - name: Perform a cleanup of any existing alternate disk copy
       ibm.power_aix.alt_disk:
         action: clean
+        targets: hdisk3
 
     - name: Perform a cleanup of any existing alternate disk copy and old rootvg
       ibm.power_aix.alt_disk:
         action: clean
         allow_old_rootvg: true
+
+    - name: Perform an alternate disk wakeup of the rootvg to hdisk3
+      ibm.power_aix.alt_disk:
+        action: wakeup
+        targets: hdisk3
+
+    - name: Perform an alternate disk sleep of the rootvg
+      ibm.power_aix.alt_disk:
+        action: sleep
+        rebuild_boot_image: true
+
+    - name: Perform an alternate disk copy with phases and disk_size_policy
+      ibm.power_aix.alt_disk:
+        action: copy
+        phases_to_execute: "all"
+        disk_size_policy: nearest
+        bootlist: true
+        force: true
+
+    - name: Perform an alternate disk copy of the rootvg with phases to hdisk2
+      ibm.power_aix.alt_disk:
+        action: copy
+        targets: hdisk2
+        phases_to_execute: "12"
+        bootlist: true
+        #  force: true
+
+    - name: Perform an alternate disk copy of the rootvg with phase 3 to hdisk2
+      ibm.power_aix.alt_disk:
+        action: copy
+        targets: hdisk2
+        phases_to_execute: "3"
+        bootlist: true
+
+    - name: Perform an alternate disk copy of the rootvg with phases 1-2 to hdisk2 (forced)
+      ibm.power_aix.alt_disk:
+        action: copy
+        targets: hdisk2
+        phases_to_execute: "12"
+        bootlist: true
+        force: true
+
+    - name: Perform an alternate disk copy of the rootvg with phase 3 to hdisk2 (final)
+      ibm.power_aix.alt_disk:
+        action: copy
+        targets: hdisk2
+        phases_to_execute: "3"
+        bootlist: true
+
+    - name: Run install action on existing altinst_rootvg with phases option
+      ibm.power_aix.alt_disk:
+        action: install
+        existing_altinst_rootvg: hdisk2
+        phases_to_execute: "12"
+        filesets: "printers.msg.en_US.rte"
+        image_location: /mnt/2534B_73H/installp/ppc
+
+    - name: Run install action on existing altinst_rootvg with phase 3 option
+      ibm.power_aix.alt_disk:
+        action: install
+        existing_altinst_rootvg: hdisk2
+        phases_to_execute: "3"
+        filesets: "printers.ibm6180.rte"
+        image_location: /mnt/2534B_73H/installp/ppc

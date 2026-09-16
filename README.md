@@ -82,6 +82,14 @@ example:
 4. Push to the branch (`git push origin my-new-feature`)
 5. Create new Pull Request
 
+## Support
+
+As Red Hat Ansible Certified Content, this collection is entitled to support through the Ansible Automation Platform (AAP) using the **Create issue** button on the top right corner. If a support case cannot be opened with Red Hat and the collection has been obtained either from Galaxy or GitHub, there may community help available on the [Ansible Forum](https://forum.ansible.com/). User can also raise queries or open issues at collection git hub repo [here](https://github.com/IBM/ansible-power-aix/issues)
+
+## Release Notes and Roadmap
+
+Please find [details](https://github.com/IBM/ansible-power-aix/blob/dev-collection/CHANGELOG.rst).
+
 <!-- License and Authors is optional here, but gives you the ability to highlight who is involed in the project -->
 ## License & Authors
 
@@ -119,6 +127,7 @@ Authors:
 - Gomathi Mohan <gommohan@in.ibm.com>
 - Pedro V. Torres <pvtorres@us.ibm.com>
 - Shreyansh Chamola <shreyansh.chamola@ibm.com>
+- Vivek Pandey <vivek.pandey12@ibm.com>
 
 [coc]: https://help.github.com/en/github/building-a-strong-community/adding-a-code-of-conduct-to-your-project
 [issues]: https://github.com/IBM/ansible-power-aix/issues/new

@@ -118,7 +118,7 @@ EXAMPLES = r'''
 
 - name: Run vmstat with showing paging stat
   vmstat_command:
-    show_paging_stats : true
+    show_paging_stats: true
     wpar_name: "ALL"
     interval: 1
     count: 3
@@ -138,11 +138,11 @@ rc:
     description: The command return code.
     returned: When the command is executed.
     type: int
-stdout':
+stdout:
     description: The standard output.
     returned: If the command failed.
     type: str
-stderr':
+stderr:
     description: The standard error.
     returned: If the command failed.
     type: str
